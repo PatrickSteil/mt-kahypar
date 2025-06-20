@@ -51,6 +51,24 @@
 namespace mt_kahypar {
 
 struct OriginalHypergraphInfo {
+  double computeHierarchicalEpsilonRB(const PartitionID current_k) const {
+    ASSERT(original_k > 0 && (original_k & (original_k - 1)) == 0);
+    ASSERT(current_k > 0 && (current_k & (current_k - 1)) == 0);
+
+    if (current_k == original_k) {
+      return 1.0;
+    }
+
+    const int level = static_cast<int>(std::log2(original_k / current_k));
+
+    if (level == 1) {
+      return 0.8;
+    } else if (level == 2) {
+      return 0.6;
+    } else {
+      return original_epsilon;
+    }
+  }
 
   // The initial allowed imbalance cannot be used for each bipartition as this
   // could result in an imbalanced k-way partition when performing recursive
@@ -163,7 +181,9 @@ Context setupBipartitioningContext(const Hypergraph &hypergraph,
     b_context.partition.max_part_weights.push_back(
         round((1 + b_context.partition.epsilon) * perfect_weight_p1));
   } else {
-    b_context.partition.epsilon = info.computeAdaptiveEpsilon(total_weight, k);
+    b_context.partition.epsilon = info.computeHierarchicalEpsilonRB(k);
+    /* b_context.partition.epsilon = info.computeAdaptiveEpsilon(total_weight,
+     * k); */
 
     b_context.partition.perfect_balance_part_weights.clear();
     b_context.partition.max_part_weights.clear();
