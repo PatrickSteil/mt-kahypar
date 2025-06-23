@@ -56,15 +56,15 @@ struct OriginalHypergraphInfo {
     ASSERT(current_k > 0 && (current_k & (current_k - 1)) == 0);
 
     if (current_k == original_k) {
-      return 1.0;
+      return 2.0;
     }
 
     const int level = static_cast<int>(std::log2(original_k / current_k));
 
     if (level == 1) {
-      return 0.8;
+      return 1.0;
     } else if (level == 2) {
-      return 0.6;
+      return 0.9;
     } else {
       return original_epsilon;
     }
