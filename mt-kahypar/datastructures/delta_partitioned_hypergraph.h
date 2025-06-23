@@ -35,6 +35,7 @@
 #include "mt-kahypar/datastructures/hypergraph_common.h"
 #include "mt-kahypar/datastructures/sparse_map.h"
 #include "mt-kahypar/datastructures/delta_connectivity_set.h"
+#include "mt-kahypar/datastructures/synchronized_edge_update.h"
 #include "mt-kahypar/parallel/stl/scalable_vector.h"
 #include "mt-kahypar/partition/context.h"
 
@@ -83,7 +84,6 @@ class DeltaPartitionedHypergraph {
     _part_ids_delta(),
     _pins_in_part_delta(),
     _connectivity_set_delta(context.partition.k) {
-      const bool top_level = context.type == ContextType::main;
       _part_ids_delta.initialize(MAP_SIZE_SMALL);
       _pins_in_part_delta.initialize(MAP_SIZE_LARGE);
     }
@@ -341,6 +341,7 @@ class DeltaPartitionedHypergraph {
   MT_KAHYPAR_ATTRIBUTE_ALWAYS_INLINE
   void updateConnectivitySet(const HyperedgeID e,
                              const SynchronizedEdgeUpdate& sync_update) {
+    unused(e);
     if ( sync_update.pin_count_in_from_part_after == 0 ) {
       _connectivity_set_delta.remove(sync_update.he, sync_update.from);
     }

@@ -28,10 +28,10 @@
 
 #include <limits>
 
-#include <mt-kahypar/datastructures/concurrent_bucket_map.h>
-#include <mt-kahypar/datastructures/priority_queue.h>
-#include <mt-kahypar/partition/context.h>
-#include <mt-kahypar/parallel/work_stack.h>
+#include "mt-kahypar/datastructures/concurrent_bucket_map.h"
+#include "mt-kahypar/datastructures/priority_queue.h"
+#include "mt-kahypar/partition/context.h"
+#include "mt-kahypar/parallel/work_stack.h"
 
 #include "kahypar-resources/datastructure/fast_reset_flag_array.h"
 
@@ -155,15 +155,13 @@ class UnconstrainedFMData {
   using BucketID = uint32_t;
   using AtomicBucketID = parallel::IntegralAtomicWrapper<BucketID>;
 
-  #pragma GCC diagnostic push
-  #pragma GCC diagnostic ignored "-Wmismatched-tags"
   template<typename GraphAndGainTypes>
-  struct InitializationHelper {
+  class InitializationHelper {
+   public:
     static void initialize(UnconstrainedFMData& data, const Context& context,
                            const typename GraphAndGainTypes::PartitionedHypergraph& phg,
                            const typename GraphAndGainTypes::GainCache& gain_cache);
   };
-  #pragma GCC diagnostic pop
 
   static constexpr BucketID NUM_BUCKETS = 16;
   static constexpr double BUCKET_FACTOR = 1.5;

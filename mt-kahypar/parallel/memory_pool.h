@@ -34,14 +34,14 @@
 #include <atomic>
 #include <vector>
 #include <algorithm>
-#if defined(__linux__) or defined(__APPLE__)
-#include <unistd.h>
-#elif _WIN32
+#if _WIN32
 #include <sysinfoapi.h>
+#else
+#include <unistd.h>
 #endif
 
-#include "tbb/parallel_for.h"
-#include "tbb/scalable_allocator.h"
+#include <tbb/parallel_for.h>
+#include <tbb/scalable_allocator.h>
 
 #include "mt-kahypar/macros.h"
 #include "mt-kahypar/parallel/stl/scalable_unique_ptr.h"
@@ -592,12 +592,12 @@ class MemoryPoolT {
     _use_round_robin_assignment(true),
     _use_minimum_allocation_size(true),
     _use_unused_memory_chunks(true) {
-    #if defined(__linux__) or defined(__APPLE__)
-      _page_size = sysconf(_SC_PAGE_SIZE);
-    #elif _WIN32
+    #if _WIN32
       SYSTEM_INFO sysInfo;
       GetSystemInfo(&sysInfo);
       _page_size = sysInfo.dwPageSize;
+    #else
+      _page_size = sysconf(_SC_PAGE_SIZE);
     #endif
   }
 

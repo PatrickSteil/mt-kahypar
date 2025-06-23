@@ -29,9 +29,9 @@
 
 #include <memory>
 
-#include "tbb/task.h"
+#include <tbb/task.h>
 
-#include "include/libmtkahypartypes.h"
+#include "include/mtkahypartypes.h"
 
 #include "mt-kahypar/definitions.h"
 #include "mt-kahypar/partition/factories.h"

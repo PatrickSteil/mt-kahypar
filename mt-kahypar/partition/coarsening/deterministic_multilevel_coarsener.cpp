@@ -29,8 +29,14 @@
 #include <tbb/parallel_sort.h>
 
 #include "mt-kahypar/definitions.h"
+#include "mt-kahypar/partition/coarsening/policies/rating_fixed_vertex_acceptance_policy.h"
+#include "mt-kahypar/utils/hash.h"
 
 namespace mt_kahypar {
+
+static size_t align_to_next_power_of_two(const size_t size) {
+  return std::pow(2.0, std::ceil(std::log2(static_cast<double>(size))));
+}
 
 template<typename TypeTraits>
 bool DeterministicMultilevelCoarsener<TypeTraits>::coarseningPassImpl() {
@@ -39,15 +45,18 @@ bool DeterministicMultilevelCoarsener<TypeTraits>::coarseningPassImpl() {
   timer.start_timer("coarsening_pass", "Clustering");
 
   const Hypergraph& hg = Base::currentHypergraph();
-  size_t num_nodes = Base::currentNumNodes();
+  HypernodeID num_nodes = Base::currentNumNodes();
   const double num_nodes_before_pass = num_nodes;
   vec<HypernodeID> clusters(num_nodes, kInvalidHypernode);
-  tbb::parallel_for(UL(0), num_nodes, [&](HypernodeID u) {
+  tbb::parallel_for(ID(0), num_nodes, [&](HypernodeID u) {
     cluster_weight[u] = hg.nodeWeight(u);
     opportunistic_cluster_weight[u] = cluster_weight[u];
     propositions[u] = u;
     clusters[u] = u;
   });
+
+  ds::FixedVertexSupport<Hypergraph> fixed_vertices = hg.copyOfFixedVertexSupport();
+  fixed_vertices.setMaxBlockWeight(_context.partition.max_part_weights);
 
   permutation.random_grouping(num_nodes, _context.shared_memory.static_balancing_work_packages, config.prng());
   for (size_t sub_round = 0; sub_round < config.num_sub_rounds && num_nodes > currentLevelContractionLimit(); ++sub_round) {
@@ -55,43 +64,11 @@ bool DeterministicMultilevelCoarsener<TypeTraits>::coarseningPassImpl() {
       sub_round, config.num_buckets, config.num_buckets_per_sub_round);
     size_t first = permutation.bucket_bounds[first_bucket], last = permutation.bucket_bounds[last_bucket];
 
-    // each vertex finds a cluster it wants to join
-    tbb::parallel_for(first, last, [&](size_t pos) {
-      const HypernodeID u = permutation.at(pos);
-      if (cluster_weight[u] == hg.nodeWeight(u) && hg.nodeIsEnabled(u)) {
-        calculatePreferredTargetCluster(u, clusters);
-      }
-    });
-
-    tbb::enumerable_thread_specific<size_t> num_contracted_nodes { 0 };
-
-    // already approve if we can grant all requests for proposed cluster
-    // otherwise insert to shared vector so that we can group vertices by cluster
-    tbb::parallel_for(first, last, [&](size_t pos) {
-      HypernodeID u = permutation.at(pos);
-      HypernodeID target = propositions[u];
-      if (target != u) {
-        if (opportunistic_cluster_weight[target] <= _context.coarsening.max_allowed_node_weight) {
-          // if other nodes joined cluster u but u itself leaves for a different cluster, it doesn't count
-          if (opportunistic_cluster_weight[u] == hg.nodeWeight(u)) {
-            num_contracted_nodes.local() += 1;
-          }
-          clusters[u] = target;
-          cluster_weight[target] = opportunistic_cluster_weight[target];
-        } else {
-          nodes_in_too_heavy_clusters.push_back_buffered(u);
-        }
-      }
-    });
-
-    num_nodes -= num_contracted_nodes.combine(std::plus<>());
-    nodes_in_too_heavy_clusters.finalize();
-
-    if (nodes_in_too_heavy_clusters.size() > 0) {
-      num_nodes -= approveVerticesInTooHeavyClusters(clusters);
+    if (hg.hasFixedVertices()) {
+      clusterNodesInRange<true>(clusters, num_nodes, first, last, fixed_vertices);
+    } else {
+      clusterNodesInRange<false>(clusters, num_nodes, first, last, fixed_vertices);
     }
-
-    nodes_in_too_heavy_clusters.clear();
   }
 
   timer.stop_timer("coarsening_pass");
@@ -106,18 +83,129 @@ bool DeterministicMultilevelCoarsener<TypeTraits>::coarseningPassImpl() {
 }
 
 template<typename TypeTraits>
-void DeterministicMultilevelCoarsener<TypeTraits>::calculatePreferredTargetCluster(HypernodeID u, const vec<HypernodeID>& clusters) {
+template<bool has_fixed_vertices>
+void DeterministicMultilevelCoarsener<TypeTraits>::clusterNodesInRange(vec<HypernodeID>& clusters,
+                                                                       HypernodeID& num_nodes,
+                                                                       size_t first,
+                                                                       size_t last,
+                                                                       ds::FixedVertexSupport<Hypergraph>& fixed_vertices) {
   const Hypergraph& hg = Base::currentHypergraph();
-  auto& ratings = default_rating_maps.local();
-  ratings.clear();
+
+  // each vertex finds a cluster it wants to join
+  tbb::parallel_for(first, last, [&](size_t pos) {
+    const HypernodeID u = permutation.at(pos);
+    if (cluster_weight[u] == hg.nodeWeight(u) && hg.nodeIsEnabled(u)) {
+      if (useLargeRatingMapForRatingOfHypernode(hg, u)) {
+        calculatePreferredTargetCluster<has_fixed_vertices>(u, clusters, default_rating_maps.local(), fixed_vertices);
+      } else {
+        // note: the cache efficient rating map is still deterministic since its size (and thus the iteration order) never changes
+        calculatePreferredTargetCluster<has_fixed_vertices>(u, clusters, cache_efficient_rating_maps.local(), fixed_vertices);
+      }
+    }
+  });
+
+  if (_context.coarsening.det_resolve_swaps) {
+    handleNodeSwaps(first, last, hg);
+  }
+
+  tbb::enumerable_thread_specific<size_t> num_contracted_nodes{ 0 };
+  // already approve if we can grant all requests for proposed cluster
+  // otherwise insert to shared vector so that we can group vertices by cluster
+  tbb::parallel_for(first, last, [&](size_t pos) {
+    HypernodeID u = permutation.at(pos);
+    HypernodeID target = propositions[u];
+    if (target != u) {
+      if (opportunistic_cluster_weight[target] <= _context.coarsening.max_allowed_node_weight) {
+        // if other nodes joined cluster u but u itself leaves for a different cluster, it doesn't count
+        if (opportunistic_cluster_weight[u] == hg.nodeWeight(u)) {
+          num_contracted_nodes.local() += 1;
+        } else {
+          cluster_weights_to_fix.push_back_buffered(u);
+        }
+        bool accept_fixed_vertex_contraction = true;
+        if constexpr (has_fixed_vertices) {
+          accept_fixed_vertex_contraction = fixed_vertices.contract(target, u);
+        }
+        if (accept_fixed_vertex_contraction) {
+          clusters[u] = target;
+          cluster_weight[target] = opportunistic_cluster_weight[target];
+        }
+      } else {
+        if (opportunistic_cluster_weight[u] != hg.nodeWeight(u)) {
+          // node u could still not move
+          cluster_weights_to_fix.push_back_buffered(u);
+        }
+        nodes_in_too_heavy_clusters.push_back_buffered(u);
+      }
+    }
+  });
+
+  num_nodes -= num_contracted_nodes.combine(std::plus<>());
+  nodes_in_too_heavy_clusters.finalize();
+  if (nodes_in_too_heavy_clusters.size() > 0) {
+    num_nodes -= approveNodes<has_fixed_vertices>(clusters, fixed_vertices);
+    nodes_in_too_heavy_clusters.clear();
+  }
+
+  cluster_weights_to_fix.finalize();
+  if (cluster_weights_to_fix.size() > 0) {
+    tbb::parallel_for(UL(0), cluster_weights_to_fix.size(), [&](const size_t i) {
+      const HypernodeID hn = cluster_weights_to_fix[i];
+      const HypernodeID cluster = clusters[hn];
+      if (cluster != hn) {
+        cluster_weight[hn] -= hg.nodeWeight(hn);
+        opportunistic_cluster_weight[hn] -= hg.nodeWeight(hn);
+      }
+    });
+    cluster_weights_to_fix.clear();
+  }
+
+  HEAVY_COARSENING_ASSERT([&] {
+    vec<HypernodeWeight> cluster_weight_recalced(cluster_weight.size(), 0);
+    for (const HypernodeID hn : hg.nodes()) {
+      const HypernodeID cluster = clusters[hn];
+      cluster_weight_recalced[cluster] += hg.nodeWeight(hn);
+    }
+    for (const HypernodeID c : hg.nodes()) {
+      if (cluster_weight_recalced[c] > 0 && (cluster_weight_recalced[c] != cluster_weight[c] || cluster_weight_recalced[c] != opportunistic_cluster_weight[c])) {
+        LOG << "Wrong cluster weight: " << V(cluster_weight_recalced[c]) << ", " << V(cluster_weight[c]) << ", " << V(opportunistic_cluster_weight[c]);
+        return false;
+      }
+    }
+  }(), "Clustering calculated wrong cluster-weights/opportunistic-cluster-weights");
+}
+
+template<typename TypeTraits>
+template<bool has_fixed_vertices, typename RatingMap>
+void DeterministicMultilevelCoarsener<TypeTraits>::calculatePreferredTargetCluster(HypernodeID u,
+                                                                                   const vec<HypernodeID>& clusters,
+                                                                                   RatingMap& tmp_ratings,
+                                                                                   const ds::FixedVertexSupport<Hypergraph>& fixed_vertices) {
+  const Hypergraph& hg = Base::currentHypergraph();
+  tmp_ratings.clear();
 
   // calculate ratings
-  for (HyperedgeID he : hg.incidentEdges(u)) {
-    HypernodeID he_size = hg.edgeSize(he);
-    if (he_size < _context.partition.ignore_hyperedge_size_threshold) {
-      double he_score = static_cast<double>(hg.edgeWeight(he)) / he_size;
-      for (HypernodeID v : hg.pins(he)) {
-        ratings[clusters[v]] += he_score;
+  if constexpr (Hypergraph::is_graph) {
+    for (HyperedgeID he : hg.incidentEdges(u)) {
+      double he_score = static_cast<double>(hg.edgeWeight(he));
+      const HypernodeID representative = clusters[hg.edgeTarget(he)];
+      tmp_ratings[representative] += he_score;
+    }
+  } else {
+    auto& bloom_filter = bloom_filters.local();
+    for (HyperedgeID he : hg.incidentEdges(u)) {
+      HypernodeID he_size = hg.edgeSize(he);
+      if (he_size < _context.partition.ignore_hyperedge_size_threshold) {
+        double he_score = static_cast<double>(hg.edgeWeight(he)) / he_size;
+        for (HypernodeID v : hg.pins(he)) {
+          const HypernodeID target = clusters[v];
+          const HypernodeID bloom_rep = target & bloom_filter_mask;
+          if (!bloom_filter[bloom_rep]) {
+            tmp_ratings[target] += he_score;
+            bloom_filter.set(bloom_rep, true);
+          }
+        }
+        bloom_filter.reset();
       }
     }
   }
@@ -128,11 +216,17 @@ void DeterministicMultilevelCoarsener<TypeTraits>::calculatePreferredTargetClust
   vec<HypernodeID>& best_targets = ties.local();
   double best_score = 0.0;
 
-  for (const auto& entry : ratings) {
+  for (const auto& entry : tmp_ratings) {
     HypernodeID target_cluster = entry.key;
     double target_score = entry.value;
+    bool accept_fixed_vertex_contraction = true;
+    if constexpr ( has_fixed_vertices ) {
+      accept_fixed_vertex_contraction = FixedVertexAcceptancePolicy::acceptContraction(hg, fixed_vertices, _context, target_cluster,u);
+    }
+
     if (target_score >= best_score && target_cluster != u && hg.communityID(target_cluster) == comm_u
-        && cluster_weight[target_cluster] + weight_u <= _context.coarsening.max_allowed_node_weight) {
+        && cluster_weight[target_cluster] + weight_u <= _context.coarsening.max_allowed_node_weight
+        && accept_fixed_vertex_contraction) {
       if (target_score > best_score) {
         best_targets.clear();
         best_score = target_score;
@@ -148,9 +242,9 @@ void DeterministicMultilevelCoarsener<TypeTraits>::calculatePreferredTargetClust
     best_target = u;
   } else {
     hashing::SimpleIntHash<uint32_t> sih;
-    hashing::HashRNG hash_prng(sih, u);
+    hashing::HashRNG<hashing::SimpleIntHash<uint32_t>> hash_prng(sih, u);
     size_t pos = std::uniform_int_distribution<uint32_t>(0, best_targets.size() - 1)(hash_prng);
-    assert(pos < best_targets.size());
+    ASSERT(pos < best_targets.size());
     best_target = best_targets[pos];
   }
   best_targets.clear();
@@ -162,7 +256,8 @@ void DeterministicMultilevelCoarsener<TypeTraits>::calculatePreferredTargetClust
 }
 
 template<typename TypeTraits>
-size_t DeterministicMultilevelCoarsener<TypeTraits>::approveVerticesInTooHeavyClusters(vec<HypernodeID>& clusters) {
+template<bool has_fixed_vertices>
+size_t DeterministicMultilevelCoarsener<TypeTraits>::approveNodes(vec<HypernodeID>& clusters, ds::FixedVertexSupport<Hypergraph>& fixed_vertices) {
   const Hypergraph& hg = Base::currentHypergraph();
   tbb::enumerable_thread_specific<size_t> num_contracted_nodes { 0 };
 
@@ -183,11 +278,14 @@ size_t DeterministicMultilevelCoarsener<TypeTraits>::approveVerticesInTooHeavyCl
       // could be parallelized without extra memory but factor 2 work overhead and log(n) depth via binary search
       for (; ; ++first_rejected) {
         // we know that this cluster is too heavy, so the loop will terminate before
-        assert(first_rejected < nodes_in_too_heavy_clusters.size());
-        assert(propositions[nodes_in_too_heavy_clusters[first_rejected]] == target);
+        ASSERT(first_rejected < nodes_in_too_heavy_clusters.size());
+        ASSERT(propositions[nodes_in_too_heavy_clusters[first_rejected]] == target);
         HypernodeID v = nodes_in_too_heavy_clusters[first_rejected];
         if (target_weight + hg.nodeWeight(v) > _context.coarsening.max_allowed_node_weight) {
           break;
+        }
+        if (has_fixed_vertices && !fixed_vertices.contract(target, v)) {
+          continue;
         }
         clusters[v] = target;
         target_weight += hg.nodeWeight(v);
@@ -202,6 +300,63 @@ size_t DeterministicMultilevelCoarsener<TypeTraits>::approveVerticesInTooHeavyCl
   });
 
   return num_contracted_nodes.combine(std::plus<>());
+}
+
+template<typename TypeTraits>
+void DeterministicMultilevelCoarsener<TypeTraits>::handleNodeSwaps(const size_t first, const size_t last, const Hypergraph& hg) {
+  tbb::parallel_for(first, last, [&](size_t pos) {
+    const HypernodeID u = permutation.at(pos);
+    const HypernodeID v = propositions[u];
+    if (u < v && u == propositions[v]) {
+      const HypernodeID target = opportunistic_cluster_weight[u] > opportunistic_cluster_weight[v] ? u : v;
+      const HypernodeID source = target == u ? v : u;
+      propositions[u] = target;
+      propositions[v] = target;
+      opportunistic_cluster_weight[source] -= hg.nodeWeight(target);
+    }
+  });
+}
+
+template<typename TypeTraits>
+bool DeterministicMultilevelCoarsener<TypeTraits>::useLargeRatingMapForRatingOfHypernode(const Hypergraph& hypergraph, const HypernodeID u) {
+  const size_t cache_efficient_map_size = CacheEfficientRatingMap::MAP_SIZE;
+
+  // In case the current number of nodes is smaller than size
+  // of the cache-efficient sparse map, the large tmp rating map
+  // consumes less memory
+  if (Base::currentNumNodes() < cache_efficient_map_size) {
+    return true;
+  }
+
+  // If the number of estimated neighbors is greater than the size of the cache efficient rating map / 3, we
+  // use the large sparse map. The division by 3 also ensures that the fill grade
+  // of the cache efficient sparse map would be small enough such that linear probing
+  // is fast.
+  if constexpr (Hypergraph::is_graph) {
+    return hypergraph.nodeDegree(u) > cache_efficient_map_size / 3UL;
+  } else {
+    // Compute estimation for the upper bound of neighbors of u
+    HypernodeID ub_neighbors_u = 0;
+    for (const HyperedgeID& he : hypergraph.incidentEdges(u)) {
+      const HypernodeID edge_size = hypergraph.edgeSize(he);
+      // Ignore large hyperedges
+      ub_neighbors_u += edge_size < _context.partition.ignore_hyperedge_size_threshold ? edge_size : 0;
+      if (ub_neighbors_u > cache_efficient_map_size / 3UL) {
+        return true;
+      }
+    }
+    return false;
+  }
+}
+
+template<typename TypeTraits>
+void DeterministicMultilevelCoarsener<TypeTraits>::initializeEdgeDeduplication(mt_kahypar_hypergraph_t hypergraph) {
+  auto& hg = utils::cast<Hypergraph>(hypergraph);
+  if constexpr (!Hypergraph::is_graph) {
+    size_t max_edge_size = hg.maxEdgeSize();
+    bloom_filter_mask = align_to_next_power_of_two(std::min<size_t>(10 * max_edge_size, initial_num_nodes)) - 1;
+    bloom_filters = tbb::enumerable_thread_specific<kahypar::ds::FastResetFlagArray<>>(bloom_filter_mask + 1);
+  }
 }
 
 INSTANTIATE_CLASS_WITH_TYPE_TRAITS(DeterministicMultilevelCoarsener)

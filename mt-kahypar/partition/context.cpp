@@ -114,8 +114,13 @@ namespace mt_kahypar {
     str << "  Minimum Shrink Factor:              " << params.minimum_shrink_factor << std::endl;
     str << "  Maximum Shrink Factor:              " << params.maximum_shrink_factor << std::endl;
     str << "  Vertex Degree Sampling Threshold:   " << params.vertex_degree_sampling_threshold << std::endl;
-    str << "  Number of subrounds (deterministic):" << params.num_sub_rounds_deterministic << std::endl;
-    str << std::endl << params.rating;
+    if ( params.algorithm == CoarseningAlgorithm::deterministic_multilevel_coarsener ) {
+      str << "  Number of Subrounds:                " << params.num_sub_rounds_deterministic << std::endl;
+      str << "  Resolve Node Swaps:                 " << std::boolalpha << params.det_resolve_swaps << std::endl;
+    }
+    if ( params.algorithm == CoarseningAlgorithm::multilevel_coarsener || params.algorithm == CoarseningAlgorithm::nlevel_coarsener ) {
+      str << std::endl << params.rating;
+    }
     return str;
   }
 
@@ -128,6 +133,19 @@ namespace mt_kahypar {
       str << "    Rebalancing:                      " << std::boolalpha << params.rebalancing << std::endl;
       str << "    HE Size Activation Threshold:     " << std::boolalpha << params.hyperedge_size_activation_threshold << std::endl;
       str << "    Relative Improvement Threshold:   " << params.relative_improvement_threshold << std::endl;
+    }
+    return str;
+  }
+
+  std::ostream & operator<< (std::ostream& str, const JetParameters& params) {
+    str << "  Jet Parameters:" << std::endl;
+    str << "    Algorithm:                        " << params.algorithm << std::endl;
+    if ( params.algorithm != JetAlgorithm::do_nothing ) {
+      str << "    Iterations without Improvement:   " << params.num_iterations << std::endl;
+      str << "    Relative Improvement Threshold:   " << params.relative_improvement_threshold << std::endl;
+      str << "    Dynamic Rounds:                   " << params.dynamic_rounds << std::endl;
+      str << "    Initial Negative Gain Factor:     " << params.initial_negative_gain_factor << std::endl;
+      str << "    Final Negative Gain Factor:       " << params.final_negative_gain_factor << std::endl;
     }
     return str;
   }
@@ -163,12 +181,15 @@ namespace mt_kahypar {
     return out;
   }
 
-  std::ostream& operator<<(std::ostream& out, const NLevelGlobalFMParameters& params) {
-    if ( params.use_global_fm ) {
-      out << "  Boundary FM Parameters: \n";
+  std::ostream& operator<<(std::ostream& out, const NLevelGlobalRefinementParameters& params) {
+    if ( params.use_global_refinement ) {
+      out << "  Global Refinement Parameters:" << std::endl;
       out << "    Refine Until No Improvement:      " << std::boolalpha << params.refine_until_no_improvement << std::endl;
-      out << "    Num Seed Nodes:                   " << params.num_seed_nodes << std::endl;
-      out << "    Obey Minimal Parallelism:         " << std::boolalpha << params.obey_minimal_parallelism << std::endl;
+      out << "    FM Algorithm:                     " << params.fm_algorithm << std::endl;
+      out << "    FM Num Seed Nodes:                " << params.fm_num_seed_nodes << std::endl;
+      out << "    FM Obey Minimal Parallelism:      " << std::boolalpha << params.fm_obey_minimal_parallelism << std::endl;
+      out << "    LP Algorithm:                     " << params.lp_algorithm << std::endl;
+      out << "    LP Unconstrained:                 " << std::boolalpha << params.lp_unconstrained << std::endl;
     }
     return out;
   }
@@ -201,19 +222,31 @@ namespace mt_kahypar {
     return out;
   }
 
+  std::ostream& operator<<(std::ostream& out, const RebalancingParameters& params) {
+    out << "  Rebalancing Parameters:" << std::endl;
+    out << "    Algorithm:                        " << params.algorithm << std::endl;
+    if ( params.algorithm == RebalancingAlgorithm::deterministic ) {
+      out << "    Heavy vertex exclusion factor:    " << params.det_heavy_vertex_exclusion_factor << std::endl;
+      out << "    Relative deadone size:            " << params.det_relative_deadzone_size << std::endl;
+      out << "    Max rounds:                       " << params.det_max_rounds << std::endl;
+    }
+    return out;
+  }
+
   std::ostream & operator<< (std::ostream& str, const RefinementParameters& params) {
     str << "Refinement Parameters:" << std::endl;
-    str << "  Rebalancing Algorithm:              " << params.rebalancer << std::endl;
     str << "  Refine Until No Improvement:        " << std::boolalpha << params.refine_until_no_improvement << std::endl;
     str << "  Relative Improvement Threshold:     " << params.relative_improvement_threshold << std::endl;
     str << "  Maximum Batch Size:                 " << params.max_batch_size << std::endl;
     str << "  Min Border Vertices Per Thread:     " << params.min_border_vertices_per_thread << std::endl;
     str << "\n" << params.label_propagation;
+    str << "\n" << params.jet;
     str << "\n" << params.fm;
-    if ( params.global_fm.use_global_fm ) {
-      str << "\n" << params.global_fm;
+    if ( params.global.use_global_refinement ) {
+      str << "\n" << params.global;
     }
     str << "\n" << params.flows;
+    str << "\n" << params.rebalancing;
     return str;
   }
 
@@ -249,7 +282,9 @@ namespace mt_kahypar {
   std::ostream & operator<< (std::ostream& str, const SharedMemoryParameters& params) {
     str << "Shared Memory Parameters:             " << std::endl;
     str << "  Number of Threads:                  " << params.num_threads << std::endl;
-    str << "  Number of used NUMA nodes:          " << TBBInitializer::instance().num_used_numa_nodes() << std::endl;
+    if constexpr (TBBInitializer::provides_numa_information) {
+      str << "  Number of used NUMA nodes:          " << TBBInitializer::instance().num_used_numa_nodes() << std::endl;
+    }
     str << "  Use Localized Random Shuffle:       " << std::boolalpha << params.use_localized_random_shuffle << std::endl;
     str << "  Random Shuffle Block Size:          " << params.shuffle_block_size << std::endl;
     return str;
@@ -368,6 +403,13 @@ namespace mt_kahypar {
     shared_memory.static_balancing_work_packages = std::clamp(shared_memory.static_balancing_work_packages, size_t(4), size_t(256));
 
     if ( partition.objective == Objective::steiner_tree ) {
+      if ( partition.preset_type == PresetType::large_k ) {
+        // steiner trees scale really badly with k (cubic with no parallelization), so we don't want to support this
+        throw UnsupportedOperationException("Large k partitioning is not supported for steiner tree metric.");
+      } else if ( partition.k > 64 && partition.instance_type == InstanceType::hypergraph ) {
+        // larger k currently don't work correctly due to collisions in the hash table
+        throw UnsupportedOperationException("Steiner tree metric on hypergraphs is currently only supported for k <= 64.");
+      }
       if ( !target_graph ) {
         partition.objective = Objective::km1;
         INFO("No target graph provided for steiner tree metric. Switching to km1 metric.");
@@ -387,31 +429,74 @@ namespace mt_kahypar {
                       partition.mode, Mode::direct);
         }
       }
+      if (mapping.max_steiner_tree_size < 2) {
+        mapping.max_steiner_tree_size = 2;
+        INFO("For steiner tree metric, max-steiner-tree-size needs to be at least 2. Setting value to 2.");
+      }
     }
 
 
     shared_memory.static_balancing_work_packages = std::clamp(shared_memory.static_balancing_work_packages, UL(4), UL(256));
 
     if ( partition.deterministic ) {
-      coarsening.algorithm = CoarseningAlgorithm::deterministic_multilevel_coarsener;
-
-      // disable FM until we have a deterministic version
-      refinement.fm.algorithm = FMAlgorithm::do_nothing;
-      initial_partitioning.refinement.fm.algorithm = FMAlgorithm::do_nothing;
-
       // disable adaptive IP
-      initial_partitioning.use_adaptive_ip_runs = false;
+      if ( initial_partitioning.use_adaptive_ip_runs ) {
+        initial_partitioning.use_adaptive_ip_runs = false;
+        WARNING("Disabling adaptive initial partitioning runs since deterministic mode is active");
+      }
 
+      // disable FM since there is no deterministic version
+      if ( refinement.fm.algorithm != FMAlgorithm::do_nothing || initial_partitioning.refinement.fm.algorithm != FMAlgorithm::do_nothing ) {
+        refinement.fm.algorithm = FMAlgorithm::do_nothing;
+        initial_partitioning.refinement.fm.algorithm = FMAlgorithm::do_nothing;
+        WARNING("Disabling FM refinement since deterministic mode is active");
+      }
 
-      // switch silently
+      // switch to deterministic algorithms
+      bool switched = false;
+
+      auto coarsening_algo = coarsening.algorithm;
+      if ( coarsening_algo != CoarseningAlgorithm::do_nothing_coarsener && coarsening_algo != CoarseningAlgorithm::deterministic_multilevel_coarsener ) {
+        coarsening.algorithm = CoarseningAlgorithm::deterministic_multilevel_coarsener;
+        switched = true;
+      }
+
+      // refinement
       auto lp_algo = refinement.label_propagation.algorithm;
       if ( lp_algo != LabelPropagationAlgorithm::do_nothing && lp_algo != LabelPropagationAlgorithm::deterministic ) {
         refinement.label_propagation.algorithm = LabelPropagationAlgorithm::deterministic;
+        switched = true;
+      }
+      auto jet_algo = refinement.jet.algorithm;
+      if ( jet_algo != JetAlgorithm::do_nothing && jet_algo != JetAlgorithm::deterministic ) {
+        refinement.jet.algorithm = JetAlgorithm::deterministic;
+        switched = true;
+      }
+      auto rebalancing_algo = refinement.rebalancing.algorithm;
+      if ( rebalancing_algo != RebalancingAlgorithm::do_nothing && rebalancing_algo != RebalancingAlgorithm::deterministic ) {
+        refinement.rebalancing.algorithm = RebalancingAlgorithm::deterministic;
+        switched = true;
       }
 
+      // refinement during initial partitioning
       lp_algo = initial_partitioning.refinement.label_propagation.algorithm;
       if ( lp_algo != LabelPropagationAlgorithm::do_nothing && lp_algo != LabelPropagationAlgorithm::deterministic ) {
         initial_partitioning.refinement.label_propagation.algorithm = LabelPropagationAlgorithm::deterministic;
+        switched = true;
+      }
+      jet_algo = initial_partitioning.refinement.jet.algorithm;
+      if ( jet_algo != JetAlgorithm::do_nothing && jet_algo != JetAlgorithm::deterministic ) {
+        initial_partitioning.refinement.jet.algorithm = JetAlgorithm::deterministic;
+        switched = true;
+      }
+      rebalancing_algo = initial_partitioning.refinement.rebalancing.algorithm;
+      if ( rebalancing_algo != RebalancingAlgorithm::do_nothing && rebalancing_algo != RebalancingAlgorithm::deterministic ) {
+        initial_partitioning.refinement.rebalancing.algorithm = RebalancingAlgorithm::deterministic;
+        switched = true;
+      }
+
+      if (switched) {
+        WARNING("Switching to deterministic algorithm variants since deterministic mode is active");
       }
     }
 
@@ -476,460 +561,6 @@ namespace mt_kahypar {
         partition.gain_policy = GainPolicy::steiner_tree_for_graphs;
       }
     }
-  }
-
-  void Context::load_default_preset() {
-    // General
-    partition.preset_type = PresetType::default_preset;
-    partition.mode = Mode::direct;
-    partition.large_hyperedge_size_threshold_factor = 0.01;
-    partition.smallest_large_he_size_threshold = 50000;
-    partition.ignore_hyperedge_size_threshold = 1000;
-    partition.num_vcycles = 0;
-
-    // shared_memory
-    shared_memory.use_localized_random_shuffle = false;
-    shared_memory.static_balancing_work_packages = 128;
-
-    // mapping
-    mapping.strategy = OneToOneMappingStrategy::greedy_mapping;
-    mapping.use_local_search = true;
-    mapping.use_two_phase_approach = false;
-    mapping.max_steiner_tree_size = 4;
-    mapping.largest_he_fraction = 0.0;
-    mapping.min_pin_coverage_of_largest_hes = 0.05;
-
-    // preprocessing
-    preprocessing.use_community_detection = true;
-    preprocessing.disable_community_detection_for_mesh_graphs = true;
-    preprocessing.community_detection.edge_weight_function = LouvainEdgeWeight::hybrid;
-    preprocessing.community_detection.max_pass_iterations = 5;
-    preprocessing.community_detection.min_vertex_move_fraction = 0.01;
-    preprocessing.community_detection.vertex_degree_sampling_threshold = 200000;
-
-    // coarsening
-    coarsening.algorithm = CoarseningAlgorithm::multilevel_coarsener;
-    coarsening.use_adaptive_edge_size= true;
-    coarsening.minimum_shrink_factor = 1.01;
-    coarsening.maximum_shrink_factor = 2.5;
-    coarsening.max_allowed_weight_multiplier = 1.0;
-    coarsening.contraction_limit_multiplier = 160;
-    coarsening.vertex_degree_sampling_threshold = 200000;
-
-    // coarsening -> rating
-    coarsening.rating.rating_function = RatingFunction::heavy_edge;
-    coarsening.rating.heavy_node_penalty_policy = HeavyNodePenaltyPolicy::no_penalty;
-    coarsening.rating.acceptance_policy = AcceptancePolicy::best_prefer_unmatched;
-
-    // initial partitioning
-    initial_partitioning.mode = Mode::recursive_bipartitioning;
-    initial_partitioning.runs = 20;
-    initial_partitioning.use_adaptive_ip_runs = true;
-    initial_partitioning.min_adaptive_ip_runs = 5;
-    initial_partitioning.perform_refinement_on_best_partitions = true;
-    initial_partitioning.fm_refinment_rounds = 1;
-    initial_partitioning.lp_maximum_iterations = 20;
-    initial_partitioning.lp_initial_block_size = 5;
-    initial_partitioning.remove_degree_zero_hns_before_ip = true;
-
-    // initial partitioning -> refinement
-    initial_partitioning.refinement.refine_until_no_improvement = false;
-
-    // initial partitioning -> refinement -> label propagation
-    initial_partitioning.refinement.label_propagation.algorithm = LabelPropagationAlgorithm::label_propagation;
-    initial_partitioning.refinement.label_propagation.maximum_iterations = 5;
-    initial_partitioning.refinement.label_propagation.rebalancing = true;
-    initial_partitioning.refinement.label_propagation.hyperedge_size_activation_threshold = 100;
-
-    // initial partitioning -> refinement -> fm
-    initial_partitioning.refinement.fm.algorithm = FMAlgorithm::kway_fm;
-    initial_partitioning.refinement.fm.multitry_rounds = 5;
-    initial_partitioning.refinement.fm.rollback_parallel = true;
-    initial_partitioning.refinement.fm.rollback_balance_violation_factor = 1;
-    initial_partitioning.refinement.fm.num_seed_nodes = 25;
-    initial_partitioning.refinement.fm.obey_minimal_parallelism = false;
-    initial_partitioning.refinement.fm.release_nodes = true;
-    initial_partitioning.refinement.fm.time_limit_factor = 0.25;
-    initial_partitioning.refinement.fm.iter_moves_on_recalc = true;
-
-    // initial partitioning -> refinement -> flows
-    initial_partitioning.refinement.flows.algorithm = FlowAlgorithm::do_nothing;
-
-    // refinement
-    refinement.rebalancer = RebalancingAlgorithm::advanced_rebalancer;
-    refinement.refine_until_no_improvement = false;
-
-    // refinement -> label propagation
-    refinement.label_propagation.algorithm = LabelPropagationAlgorithm::label_propagation;
-    refinement.label_propagation.unconstrained = true;
-    refinement.label_propagation.maximum_iterations = 5;
-    refinement.label_propagation.rebalancing = false;
-    refinement.label_propagation.hyperedge_size_activation_threshold = 100;
-    refinement.label_propagation.relative_improvement_threshold = 0.001;
-
-    // refinement -> fm
-    refinement.fm.algorithm = FMAlgorithm::unconstrained_fm;
-    refinement.fm.multitry_rounds = 10;
-    refinement.fm.unconstrained_rounds = 8;
-    refinement.fm.rollback_parallel = true;
-    refinement.fm.rollback_balance_violation_factor = 1.0;
-    refinement.fm.treshold_border_node_inclusion = 0.7;
-    refinement.fm.imbalance_penalty_min = 0.2;
-    refinement.fm.imbalance_penalty_max = 1.0;
-    refinement.fm.num_seed_nodes = 25;
-    refinement.fm.obey_minimal_parallelism = true;
-    refinement.fm.release_nodes = true;
-    refinement.fm.time_limit_factor = 0.25;
-    refinement.fm.min_improvement = -1;
-    refinement.fm.unconstrained_min_improvement = 0.002;
-    refinement.fm.iter_moves_on_recalc = true;
-
-    // refinement -> flows
-    refinement.flows.algorithm = FlowAlgorithm::do_nothing;
-  }
-
-  void Context::load_quality_preset() {
-    load_default_preset();
-
-    // General
-    partition.preset_type = PresetType::quality;
-
-    // refinement
-    refinement.refine_until_no_improvement = true;
-    refinement.relative_improvement_threshold = 0.0025;
-
-    // refinement -> label propagation
-    refinement.label_propagation.rebalancing = true;
-
-    // refinement -> flows;
-    refinement.flows.algorithm = FlowAlgorithm::flow_cutter;
-    refinement.flows.alpha = 16;
-    refinement.flows.max_num_pins = 4294967295;
-    refinement.flows.find_most_balanced_cut = true;
-    refinement.flows.determine_distance_from_cut = true;
-    refinement.flows.parallel_searches_multiplier = 1.0;
-    refinement.flows.max_bfs_distance = 2;
-    refinement.flows.time_limit_factor = 8;
-    refinement.flows.skip_small_cuts = true;
-    refinement.flows.skip_unpromising_blocks = true;
-    refinement.flows.pierce_in_bulk = true;
-    refinement.flows.min_relative_improvement_per_round = 0.001;
-    refinement.flows.steiner_tree_policy = SteinerTreeFlowValuePolicy::lower_bound;
-  }
-
-  void Context::load_deterministic_preset() {
-    // General
-    partition.preset_type = PresetType::deterministic;
-    partition.mode = Mode::direct;
-    partition.deterministic = true;
-    partition.large_hyperedge_size_threshold_factor = 0.01;
-    partition.smallest_large_he_size_threshold = 50000;
-    partition.ignore_hyperedge_size_threshold = 1000;
-    partition.num_vcycles = 0;
-
-    // shared_memory
-    shared_memory.use_localized_random_shuffle = false;
-    shared_memory.static_balancing_work_packages = 128;
-
-    // preprocessing
-    preprocessing.use_community_detection = true;
-    preprocessing.disable_community_detection_for_mesh_graphs = true;
-    preprocessing.stable_construction_of_incident_edges = true;
-    preprocessing.community_detection.edge_weight_function = LouvainEdgeWeight::hybrid;
-    preprocessing.community_detection.max_pass_iterations = 5;
-    preprocessing.community_detection.min_vertex_move_fraction = 0.01;
-    preprocessing.community_detection.vertex_degree_sampling_threshold = 200000;
-    preprocessing.community_detection.low_memory_contraction = true;
-    preprocessing.community_detection.num_sub_rounds_deterministic = 16;
-
-    // coarsening
-    coarsening.algorithm = CoarseningAlgorithm::deterministic_multilevel_coarsener;
-    coarsening.use_adaptive_edge_size= true;
-    coarsening.minimum_shrink_factor = 1.01;
-    coarsening.maximum_shrink_factor = 2.5;
-    coarsening.max_allowed_weight_multiplier = 1.0;
-    coarsening.contraction_limit_multiplier = 160;
-    coarsening.vertex_degree_sampling_threshold = 200000;
-    coarsening.num_sub_rounds_deterministic = 3;
-
-    // coarsening -> rating
-    coarsening.rating.rating_function = RatingFunction::heavy_edge;
-    coarsening.rating.heavy_node_penalty_policy = HeavyNodePenaltyPolicy::no_penalty;
-    coarsening.rating.acceptance_policy = AcceptancePolicy::best_prefer_unmatched;
-
-    // initial partitioning
-    initial_partitioning.mode = Mode::recursive_bipartitioning;
-    initial_partitioning.runs = 20;
-    initial_partitioning.use_adaptive_ip_runs = false;
-    initial_partitioning.perform_refinement_on_best_partitions = false;
-    initial_partitioning.fm_refinment_rounds = 3;
-    initial_partitioning.lp_maximum_iterations = 20;
-    initial_partitioning.lp_initial_block_size = 5;
-    initial_partitioning.population_size = 64;
-    initial_partitioning.remove_degree_zero_hns_before_ip = true;
-
-    // initial partitioning -> refinement
-    initial_partitioning.refinement.refine_until_no_improvement = false;
-
-    // initial partitioning -> refinement -> label propagation
-    initial_partitioning.refinement.label_propagation.algorithm = LabelPropagationAlgorithm::deterministic;
-    initial_partitioning.refinement.label_propagation.maximum_iterations = 5;
-    initial_partitioning.refinement.label_propagation.hyperedge_size_activation_threshold = 100;
-
-    // initial partitioning -> refinement -> deterministic
-    initial_partitioning.refinement.deterministic_refinement.num_sub_rounds_sync_lp = 1;
-    initial_partitioning.refinement.deterministic_refinement.use_active_node_set = true;
-
-    // initial partitioning -> refinement -> fm
-    initial_partitioning.refinement.fm.algorithm = FMAlgorithm::do_nothing;
-
-    // initial partitioning -> refinement -> flows
-    initial_partitioning.refinement.flows.algorithm = FlowAlgorithm::do_nothing;
-
-    // refinement
-    refinement.rebalancer = RebalancingAlgorithm::advanced_rebalancer;
-    refinement.refine_until_no_improvement = false;
-
-    // refinement -> label propagation
-    refinement.label_propagation.algorithm = LabelPropagationAlgorithm::deterministic;
-    refinement.label_propagation.maximum_iterations = 5;
-    refinement.label_propagation.hyperedge_size_activation_threshold = 100;
-
-    // refinement -> deterministic
-    refinement.deterministic_refinement.num_sub_rounds_sync_lp = 1;
-    refinement.deterministic_refinement.use_active_node_set = true;
-
-    // refinement -> fm
-    refinement.fm.algorithm = FMAlgorithm::do_nothing;
-
-    // refinement -> flows
-    refinement.flows.algorithm = FlowAlgorithm::do_nothing;
-  }
-
-  void Context::load_n_level_preset() {
-    // General
-    partition.mode = Mode::direct;
-    partition.large_hyperedge_size_threshold_factor = 0.01;
-    partition.smallest_large_he_size_threshold = 50000;
-    partition.ignore_hyperedge_size_threshold = 1000;
-    partition.num_vcycles = 0;
-
-    // shared_memory
-    shared_memory.use_localized_random_shuffle = false;
-    shared_memory.static_balancing_work_packages = 128;
-
-    // mapping
-    mapping.strategy = OneToOneMappingStrategy::greedy_mapping;
-    mapping.use_local_search = true;
-    mapping.use_two_phase_approach = false;
-    mapping.max_steiner_tree_size = 4;
-    mapping.largest_he_fraction = 0.0;
-    mapping.min_pin_coverage_of_largest_hes = 0.05;
-
-    // preprocessing
-    preprocessing.use_community_detection = true;
-    preprocessing.disable_community_detection_for_mesh_graphs = true;
-    preprocessing.community_detection.edge_weight_function = LouvainEdgeWeight::hybrid;
-    preprocessing.community_detection.max_pass_iterations = 5;
-    preprocessing.community_detection.min_vertex_move_fraction = 0.01;
-    preprocessing.community_detection.vertex_degree_sampling_threshold = 200000;
-
-    // coarsening
-    coarsening.algorithm = CoarseningAlgorithm::nlevel_coarsener;
-    coarsening.use_adaptive_edge_size = true;
-    coarsening.minimum_shrink_factor = 1.01;
-    coarsening.maximum_shrink_factor = 100.0;
-    coarsening.max_allowed_weight_multiplier = 1.0;
-    coarsening.contraction_limit_multiplier = 160;
-    coarsening.vertex_degree_sampling_threshold = 200000;
-
-    // coarsening -> rating
-    coarsening.rating.rating_function = RatingFunction::heavy_edge;
-    coarsening.rating.heavy_node_penalty_policy = HeavyNodePenaltyPolicy::no_penalty;
-    coarsening.rating.acceptance_policy = AcceptancePolicy::best_prefer_unmatched;
-
-    // initial partitioning
-    initial_partitioning.mode = Mode::recursive_bipartitioning;
-    initial_partitioning.runs = 20;
-    initial_partitioning.use_adaptive_ip_runs = true;
-    initial_partitioning.min_adaptive_ip_runs = 5;
-    initial_partitioning.perform_refinement_on_best_partitions = true;
-    initial_partitioning.fm_refinment_rounds = 2147483647;
-    initial_partitioning.lp_maximum_iterations = 20;
-    initial_partitioning.lp_initial_block_size = 5;
-    initial_partitioning.remove_degree_zero_hns_before_ip = true;
-
-    // initial partitioning -> refinement
-    initial_partitioning.refinement.refine_until_no_improvement = true;
-    initial_partitioning.refinement.max_batch_size = 1000;
-    initial_partitioning.refinement.min_border_vertices_per_thread = 0;
-
-    // initial partitioning -> refinement -> label propagation
-    initial_partitioning.refinement.label_propagation.algorithm = LabelPropagationAlgorithm::label_propagation;
-    initial_partitioning.refinement.label_propagation.maximum_iterations = 5;
-    initial_partitioning.refinement.label_propagation.rebalancing = true;
-    initial_partitioning.refinement.label_propagation.hyperedge_size_activation_threshold = 100;
-
-    // initial partitioning -> refinement -> fm
-    initial_partitioning.refinement.fm.algorithm = FMAlgorithm::kway_fm;
-    initial_partitioning.refinement.fm.multitry_rounds = 5;
-    initial_partitioning.refinement.fm.rollback_parallel = false;
-    initial_partitioning.refinement.fm.rollback_balance_violation_factor = 1;
-    initial_partitioning.refinement.fm.num_seed_nodes = 5;
-    initial_partitioning.refinement.fm.obey_minimal_parallelism = false;
-    initial_partitioning.refinement.fm.release_nodes = true;
-    initial_partitioning.refinement.fm.time_limit_factor = 0.25;
-    initial_partitioning.refinement.fm.iter_moves_on_recalc = false;
-
-    // initial partitioning -> refinement -> flows
-    initial_partitioning.refinement.flows.algorithm = FlowAlgorithm::do_nothing;
-
-    // initial partitioning -> refinement -> global fm
-    initial_partitioning.refinement.global_fm.use_global_fm = false;
-
-    // refinement
-    refinement.rebalancer = RebalancingAlgorithm::advanced_rebalancer;
-    refinement.refine_until_no_improvement = true;
-    refinement.max_batch_size = 1000;
-    refinement.min_border_vertices_per_thread = 50;
-
-    // refinement -> label propagation
-    refinement.label_propagation.algorithm = LabelPropagationAlgorithm::label_propagation;
-    refinement.label_propagation.maximum_iterations = 5;
-    refinement.label_propagation.rebalancing = true;
-    refinement.label_propagation.hyperedge_size_activation_threshold = 100;
-
-    // refinement -> fm
-    refinement.fm.algorithm = FMAlgorithm::kway_fm;
-    refinement.fm.multitry_rounds = 10;
-    refinement.fm.rollback_parallel = false;
-    refinement.fm.rollback_balance_violation_factor = 1.25;
-    refinement.fm.num_seed_nodes = 5;
-    refinement.fm.obey_minimal_parallelism = false;
-    refinement.fm.release_nodes = true;
-    refinement.fm.time_limit_factor = 0.25;
-    refinement.fm.min_improvement = -1;
-    refinement.fm.iter_moves_on_recalc = true;
-
-    // refinement -> flows
-    refinement.flows.algorithm = FlowAlgorithm::do_nothing;
-
-    // refinement -> global fm
-    refinement.global_fm.use_global_fm = true;
-    refinement.global_fm.refine_until_no_improvement = false;
-    refinement.global_fm.num_seed_nodes = 5;
-    refinement.global_fm.obey_minimal_parallelism = true;
-  }
-
-  void Context::load_highest_quality_preset() {
-    load_n_level_preset();
-
-    // General
-    partition.preset_type = PresetType::highest_quality;
-
-    // refinement
-    refinement.relative_improvement_threshold = 0.0025;
-
-    // refinement -> fm
-    refinement.fm.iter_moves_on_recalc = false;
-
-    // refinement -> flows;
-    refinement.flows.algorithm = FlowAlgorithm::flow_cutter;
-    refinement.flows.alpha = 16;
-    refinement.flows.max_num_pins = 4294967295;
-    refinement.flows.find_most_balanced_cut = true;
-    refinement.flows.determine_distance_from_cut = true;
-    refinement.flows.parallel_searches_multiplier = 1.0;
-    refinement.flows.max_bfs_distance = 2;
-    refinement.flows.time_limit_factor = 8;
-    refinement.flows.skip_small_cuts = true;
-    refinement.flows.skip_unpromising_blocks = true;
-    refinement.flows.pierce_in_bulk = true;
-    refinement.flows.min_relative_improvement_per_round = 0.001;
-    refinement.flows.steiner_tree_policy = SteinerTreeFlowValuePolicy::lower_bound;
-
-    // refinement -> global fm
-    refinement.global_fm.refine_until_no_improvement = true;
-  }
-
-  void Context::load_large_k_preset() {
-    // General
-    partition.preset_type = PresetType::large_k;
-    partition.mode = Mode::deep_multilevel;
-    partition.large_hyperedge_size_threshold_factor = 0.01;
-    partition.smallest_large_he_size_threshold = 50000;
-    partition.ignore_hyperedge_size_threshold = 1000;
-    partition.num_vcycles = 0;
-
-    // shared_memory
-    shared_memory.use_localized_random_shuffle = false;
-    shared_memory.static_balancing_work_packages = 128;
-
-    // preprocessing
-    preprocessing.use_community_detection = true;
-    preprocessing.disable_community_detection_for_mesh_graphs = true;
-    preprocessing.community_detection.edge_weight_function = LouvainEdgeWeight::hybrid;
-    preprocessing.community_detection.max_pass_iterations = 5;
-    preprocessing.community_detection.min_vertex_move_fraction = 0.01;
-    preprocessing.community_detection.vertex_degree_sampling_threshold = 200000;
-
-    // coarsening
-    coarsening.algorithm = CoarseningAlgorithm::multilevel_coarsener;
-    coarsening.use_adaptive_edge_size= true;
-    coarsening.minimum_shrink_factor = 1.01;
-    coarsening.maximum_shrink_factor = 2.5;
-    coarsening.max_allowed_weight_multiplier = 1.0;
-    coarsening.contraction_limit_multiplier = 500;
-    coarsening.deep_ml_contraction_limit_multiplier = 160;
-    coarsening.vertex_degree_sampling_threshold = 200000;
-
-    // coarsening -> rating
-    coarsening.rating.rating_function = RatingFunction::heavy_edge;
-    coarsening.rating.heavy_node_penalty_policy = HeavyNodePenaltyPolicy::no_penalty;
-    coarsening.rating.acceptance_policy = AcceptancePolicy::best_prefer_unmatched;
-
-    // initial partitioning
-    initial_partitioning.mode = Mode::direct;
-    initial_partitioning.runs = 5;
-    initial_partitioning.use_adaptive_ip_runs = true;
-    initial_partitioning.min_adaptive_ip_runs = 3;
-    initial_partitioning.perform_refinement_on_best_partitions = true;
-    initial_partitioning.fm_refinment_rounds = 1;
-    initial_partitioning.lp_maximum_iterations = 20;
-    initial_partitioning.lp_initial_block_size = 5;
-    initial_partitioning.enabled_ip_algos = {1, 1, 0, 1, 1, 0, 1, 0, 1};
-    initial_partitioning.remove_degree_zero_hns_before_ip = true;
-
-    // initial partitioning -> refinement
-    initial_partitioning.refinement.refine_until_no_improvement = false;
-
-    // initial partitioning -> refinement -> label propagation
-    initial_partitioning.refinement.label_propagation.algorithm = LabelPropagationAlgorithm::label_propagation;
-    initial_partitioning.refinement.label_propagation.maximum_iterations = 5;
-    initial_partitioning.refinement.label_propagation.rebalancing = true;
-    initial_partitioning.refinement.label_propagation.hyperedge_size_activation_threshold = 100;
-
-    // initial partitioning -> refinement -> fm
-    initial_partitioning.refinement.fm.algorithm = FMAlgorithm::do_nothing;
-
-    // initial partitioning -> refinement -> flows
-    initial_partitioning.refinement.flows.algorithm = FlowAlgorithm::do_nothing;
-
-    // refinement
-    refinement.rebalancer = RebalancingAlgorithm::advanced_rebalancer;
-    refinement.refine_until_no_improvement = false;
-
-    // refinement -> label propagation
-    refinement.label_propagation.algorithm = LabelPropagationAlgorithm::label_propagation;
-    refinement.label_propagation.maximum_iterations = 5;
-    refinement.label_propagation.rebalancing = true;
-    refinement.label_propagation.hyperedge_size_activation_threshold = 100;
-
-    // refinement -> fm
-    refinement.fm.algorithm = FMAlgorithm::do_nothing;
-
-    // refinement -> flows
-    refinement.flows.algorithm = FlowAlgorithm::do_nothing;
   }
 
   std::ostream & operator<< (std::ostream& str, const Context& context) {

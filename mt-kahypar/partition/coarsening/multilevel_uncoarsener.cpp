@@ -26,8 +26,7 @@
  * SOFTWARE.
  ******************************************************************************/
 
-#include <mt-kahypar/partition/coarsening/multilevel_uncoarsener.h>
-
+#include "mt-kahypar/partition/coarsening/multilevel_uncoarsener.h"
 #include "mt-kahypar/definitions.h"
 #include "mt-kahypar/io/partitioning_output.h"
 #include "mt-kahypar/partition/refinement/i_refiner.h"
@@ -195,7 +194,11 @@ namespace mt_kahypar {
   template<typename TypeTraits>
   void MultilevelUncoarsener<TypeTraits>::refineImpl() {
     PartitionedHypergraph& partitioned_hypergraph = *_uncoarseningData.partitioned_hg;
-    const double time_limit = Base::refinementTimeLimit(_context, (_uncoarseningData.hierarchy)[_current_level].coarseningTime());
+    double time_limit = std::numeric_limits<double>::max();
+    if (_current_level >= 0 && _current_level != _num_levels) {
+      // there is a refinement run on the coarsest graph before projection. There is no value stored for this run, so we must avoid looking it up.
+      time_limit = Base::refinementTimeLimit(_context, (_uncoarseningData.hierarchy)[_current_level].coarseningTime());
+    }
 
     if ( debug && _context.type == ContextType::main ) {
       io::printHypergraphInfo(partitioned_hypergraph.hypergraph(),
@@ -211,7 +214,7 @@ namespace mt_kahypar {
       improvement_found = false;
       const HyperedgeWeight metric_before = _current_metrics.quality;
 
-      if ( _rebalancer && _context.refinement.rebalancer != RebalancingAlgorithm::do_nothing ) {
+      if ( _rebalancer && _context.refinement.rebalancing.algorithm != RebalancingAlgorithm::do_nothing ) {
         _rebalancer->initialize(phg);
       }
 
@@ -223,6 +226,16 @@ namespace mt_kahypar {
         _timer.start_timer("label_propagation", "Label Propagation");
         improvement_found |= _label_propagation->refine(phg, dummy, _current_metrics, time_limit);
         _timer.stop_timer("label_propagation");
+      }
+
+      if ( _jet && _context.refinement.jet.algorithm != JetAlgorithm::do_nothing ) {
+        _timer.start_timer("initialize_jet_refiner", "Initialize Jet Refiner");
+        _jet->initialize(phg);
+        _timer.stop_timer("initialize_jet_refiner");
+
+        _timer.start_timer("jet", "Jet");
+        improvement_found |= _jet->refine(phg, dummy, _current_metrics, time_limit);
+        _timer.stop_timer("jet");
       }
 
       if ( _fm && _context.refinement.fm.algorithm != FMAlgorithm::do_nothing ) {

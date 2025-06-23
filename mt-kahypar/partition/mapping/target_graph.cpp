@@ -37,13 +37,18 @@ namespace mt_kahypar {
 
 #ifdef KAHYPAR_ENABLE_STEINER_TREE_METRIC
 void TargetGraph::precomputeDistances(const size_t max_connectivity) {
+  ALWAYS_ASSERT(max_connectivity >= 2);
+  if (!inputGraphIsConnected()) {
+    throw InvalidInputException("Target graph must be connected, but it is not.");
+  }
+
   const size_t num_entries = std::pow(_k, max_connectivity);
   if ( num_entries > MEMORY_LIMIT ) {
     throw SystemException(
       "Too much memory requested for precomputing steiner trees "
       "of connectivity sets in the target graph.");
   }
-  _distances.assign(num_entries, std::numeric_limits<HyperedgeWeight>::max() / 3);
+  _distances.assign(num_entries, kInvalidDistance);
   SteinerTree::compute(_graph, max_connectivity, _distances);
 
   _max_precomputed_connectitivty = max_connectivity;
@@ -52,16 +57,18 @@ void TargetGraph::precomputeDistances(const size_t max_connectivity) {
 
 HyperedgeWeight TargetGraph::distance(const ds::StaticBitset& connectivity_set) const {
   const PartitionID connectivity = connectivity_set.popcount();
-  const size_t idx = index(connectivity_set);
   if ( likely(connectivity <= _max_precomputed_connectitivty) ) {
+    const size_t idx = index(connectivity_set);
     ASSERT(idx < _distances.size());
     if constexpr ( TRACK_STATS ) ++_stats.precomputed;
+    ASSERT(_distances[idx] < kInvalidDistance);
     return _distances[idx];
   } else {
+    const uint64_t hash_key = computeHash(connectivity_set);
     // We have not precomputed the optimal steiner tree for the connectivity set.
-    #ifdef __linux__
+    #ifdef KAHYPAR_USE_GROWT
     HashTableHandle& handle = _handles.local();
-    auto res = handle.find(idx);
+    auto res = handle.find(hash_key);
     if ( likely( res != handle.end() ) ) {
       if constexpr ( TRACK_STATS ) ++_stats.cache_hits;
       return (*res).second;
@@ -70,11 +77,11 @@ HyperedgeWeight TargetGraph::distance(const ds::StaticBitset& connectivity_set) 
       // Entry is not cached => Compute 2-approximation of optimal steiner tree
       const HyperedgeWeight mst_weight =
         computeWeightOfMSTOnMetricCompletion(connectivity_set);
-      handle.insert(idx, mst_weight);
+      handle.insert(hash_key, mst_weight);
       return mst_weight;
     }
-    #elif defined(_WIN32) or defined(__APPLE__)
-    auto res = _cache.find(idx);
+    #else
+    auto res = _cache.find(hash_key);
     if ( likely ( res != _cache.end() ) ) {
       if constexpr ( TRACK_STATS ) ++_stats.cache_hits;
       return res->second;
@@ -83,7 +90,7 @@ HyperedgeWeight TargetGraph::distance(const ds::StaticBitset& connectivity_set) 
       // Entry is not cached => Compute 2-approximation of optimal steiner tree
       const HyperedgeWeight mst_weight =
         computeWeightOfMSTOnMetricCompletion(connectivity_set);
-      _cache.insert(std::make_pair(idx, mst_weight));
+      _cache.insert(std::make_pair(hash_key, mst_weight));
       return mst_weight;
     }
     #endif
@@ -149,6 +156,29 @@ HyperedgeWeight TargetGraph::computeWeightOfMSTOnMetricCompletion(const ds::Stat
   remaining_nodes.reset();
   ASSERT(pq.empty());
   return res;
+}
+
+bool TargetGraph::inputGraphIsConnected() const {
+  // stack-based DFS
+  std::vector<uint8_t> visited;
+  std::vector<HypernodeID> stack;
+  visited.resize(_graph.initialNumNodes(), 0);
+  stack.push_back(0);
+  visited[0] = 1;
+  HypernodeID num_visited = 1;
+  while (!stack.empty() && num_visited < _graph.initialNumNodes()) {
+    HypernodeID hn = stack.back();
+    stack.pop_back();
+    for (HyperedgeID edge: _graph.incidentEdges(hn)) {
+      HypernodeID neighbor = _graph.edgeTarget(edge);
+      if (visited[neighbor] == 0) {
+        stack.push_back(neighbor);
+        visited[neighbor] = 1;
+        num_visited++;
+      }
+    }
+  }
+  return num_visited == _graph.initialNumNodes();
 }
 #endif
 

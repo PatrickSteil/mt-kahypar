@@ -27,8 +27,8 @@
 #include <atomic>
 #include "gmock/gmock.h"
 
-#include "tbb/parallel_for.h"
-#include "tbb/enumerable_thread_specific.h"
+#include <tbb/parallel_for.h>
+#include <tbb/enumerable_thread_specific.h>
 
 #include "mt-kahypar/definitions.h"
 #include "mt-kahypar/datastructures/static_graph_factory.h"
@@ -128,9 +128,9 @@ class AGainCache : public Test {
     if ( !is_nlevel ) {
       std::vector<PartitionID> partition;
       if constexpr ( Hypergraph::is_graph ) {
-        io::readPartitionFile("../tests/instances/delaunay_n10.graph.part8", partition);
+        io::readPartitionFile("../tests/instances/delaunay_n10.graph.part8", hypergraph.initialNumNodes(), partition);
       } else {
-        io::readPartitionFile("../tests/instances/contracted_unweighted_ibm01.hgr.part8", partition);
+        io::readPartitionFile("../tests/instances/contracted_unweighted_ibm01.hgr.part8", hypergraph.initialNumNodes(), partition);
       }
       partitioned_hg.doParallelForAllNodes([&](const HypernodeID& hn) {
         partitioned_hg.setOnlyNodePart(hn, partition[hn]);
@@ -447,7 +447,7 @@ typedef ::testing::Types<TestConfig<StaticHypergraphTypeTraits, Km1GainTypes>,
                          ENABLE_LARGE_K(ENABLE_SOED(COMMA TestConfig<LargeKHypergraphTypeTraits COMMA SoedGainTypes>))
                          ENABLE_LARGE_K(ENABLE_STEINER_TREE(COMMA TestConfig<LargeKHypergraphTypeTraits COMMA SteinerTreeGainTypes>))> TestConfigs;
 
-TYPED_TEST_CASE(AGainCache, TestConfigs);
+TYPED_TEST_SUITE(AGainCache, TestConfigs);
 
 TYPED_TEST(AGainCache, HasCorrectInitialGains) {
   this->initializePartition();

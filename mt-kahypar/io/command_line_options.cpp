@@ -27,7 +27,6 @@
 
 #include "command_line_options.h"
 
-#include <boost/program_options.hpp>
 #ifdef _WIN32
 #include <windows.h>
 #include <process.h>
@@ -132,7 +131,7 @@ namespace mt_kahypar {
              po::value<bool>(&context.partition.perform_parallel_recursion_in_deep_multilevel)->value_name("<bool>")->default_value(true),
              "If true, then we perform parallel recursion within the deep multilevel scheme.")
             ("smallest-maxnet-threshold",
-            po::value<uint32_t>(&context.partition.smallest_large_he_size_threshold)->value_name("<uint32_t>"),
+            po::value<HypernodeID>(&context.partition.smallest_large_he_size_threshold)->value_name("<int>"),
             "No hyperedge whose size is smaller than this threshold is removed in the large hyperedge removal step (see maxnet-removal-factor)")
             ("maxnet-removal-factor",
              po::value<double>(&context.partition.large_hyperedge_size_threshold_factor)->value_name(
@@ -246,6 +245,7 @@ namespace mt_kahypar {
              " - multilevel_coarsener"
              " - nlevel_coarsener"
              " - deterministic_multilevel_coarsener"
+             " - do_nothing"
              )
             ("c-use-adaptive-edge-size",
              po::value<bool>(&context.coarsening.use_adaptive_edge_size)->value_name("<bool>")->default_value(true),
@@ -310,7 +310,10 @@ namespace mt_kahypar {
             ("c-num-sub-rounds",
              po::value<size_t>(&context.coarsening.num_sub_rounds_deterministic)->value_name(
                      "<size_t>")->default_value(16),
-             "Number of sub-rounds used for deterministic coarsening.");
+             "Number of sub-rounds used for deterministic coarsening.")
+            ("c-resolve-swaps",
+             po::value<bool>(&context.coarsening.det_resolve_swaps)->value_name("<bool>")->default_value(true),
+             "Whether to resolve node swaps in a postprocessing step for deterministic coarsening.");
     return options;
   }
 
@@ -389,6 +392,43 @@ namespace mt_kahypar {
                                 &context.initial_partitioning.refinement.label_propagation.relative_improvement_threshold))->value_name(
                      "<double>")->default_value(-1.0),
              "Relative improvement threshold for label propagation.")
+            ((initial_partitioning ? "i-r-jet-type" : "r-jet-type"),
+             po::value<std::string>()->value_name("<string>")->notifier(
+                     [&, initial_partitioning](const std::string& type) {
+                       if (initial_partitioning) {
+                         context.initial_partitioning.refinement.jet.algorithm = jetAlgorithmFromString(type);
+                       } else {
+                         context.refinement.jet.algorithm = jetAlgorithmFromString(type);
+                       }
+                     })->default_value("do_nothing"),
+             "Jet Algorithm:\n"
+             "- deterministic\n"
+             "- do_nothing")
+            ((initial_partitioning ? "i-r-jet-num-iterations": "r-jet-num-iterations"),
+            po::value<size_t>((!initial_partitioning ? &context.refinement.jet.num_iterations :
+                              &context.initial_partitioning.refinement.jet.num_iterations))->value_name(
+                    "<size_t>")->default_value(12),
+             "Number of iterations without significant improvement")
+            ((initial_partitioning ? "i-r-jet-relative-improvement-threshold" : "r-jet-relative-improvement-threshold"),
+             po::value<double>((!initial_partitioning ? &context.refinement.jet.relative_improvement_threshold :
+                                &context.initial_partitioning.refinement.jet.relative_improvement_threshold))->value_name(
+                     "<double>")->default_value(0.001),
+             "Relative improvement threshold for Jet.")
+             ((initial_partitioning ? "i-r-jet-dynamic-rounds" : "r-jet-dynamic-rounds"),
+             po::value<size_t>(
+                     (initial_partitioning ? &context.initial_partitioning.refinement.jet.dynamic_rounds :
+                      &context.refinement.jet.dynamic_rounds))->value_name("<size_t>")->default_value(1),
+             "Number of dynamic rounds with decreasing temperature")
+             ((initial_partitioning ? "i-r-jet-initial-negative-gain" : "r-jet-initial-negative-gain"),
+             po::value<double>(
+                     (initial_partitioning ? &context.initial_partitioning.refinement.jet.initial_negative_gain_factor :
+                      &context.refinement.jet.initial_negative_gain_factor))->value_name("<double>")->default_value(0.75),
+             "Initial negative gain factor for dynamic gain factor")
+             ((initial_partitioning ? "i-r-jet-final-negative-gain" : "r-jet-final-negative-gain"),
+             po::value<double>(
+                     (initial_partitioning ? &context.initial_partitioning.refinement.jet.final_negative_gain_factor :
+                      &context.refinement.jet.final_negative_gain_factor))->value_name("<double>")->default_value(0.0),
+             "Final negative gain factor for dynamic gain factor")
             ((initial_partitioning ? "i-r-fm-type" : "r-fm-type"),
              po::value<std::string>()->value_name("<string>")->notifier(
                      [&, initial_partitioning](const std::string& type) {
@@ -487,38 +527,85 @@ namespace mt_kahypar {
              "If the FM refiner exceeds 2 * time_limit, than the current multitry FM run is aborted and the algorithm proceeds to"
              "the next finer level.")
             ((initial_partitioning ? "i-r-use-global-fm" : "r-use-global-fm"),
-             po::value<bool>((!initial_partitioning ? &context.refinement.global_fm.use_global_fm :
-                              &context.initial_partitioning.refinement.global_fm.use_global_fm))->value_name(
+             po::value<bool>((!initial_partitioning ? &context.refinement.global.use_global_refinement :
+                              &context.initial_partitioning.refinement.global.use_global_refinement))->value_name(
                      "<bool>")->default_value(false),
              "If true, than we execute a globalized FM local search interleaved with the localized searches."
              "Note, gobalized FM local searches are performed in multilevel style (not after each batch uncontraction)")
             ((initial_partitioning ? "i-r-global-refine-until-no-improvement" : "r-global-refine-until-no-improvement"),
-             po::value<bool>((!initial_partitioning ? &context.refinement.global_fm.refine_until_no_improvement :
-                              &context.initial_partitioning.refinement.global_fm.refine_until_no_improvement))->value_name(
+             po::value<bool>((!initial_partitioning ? &context.refinement.global.refine_until_no_improvement :
+                              &context.initial_partitioning.refinement.global.refine_until_no_improvement))->value_name(
                      "<bool>")->default_value(false),
              "Executes a globalized FM local search as long as it finds an improvement on the current partition.")
+            ((initial_partitioning ? "i-r-global-fm-type" : "r-global-fm-type"),
+             po::value<std::string>()->value_name("<string>")->notifier(
+                     [&, initial_partitioning](const std::string& type) {
+                       if (initial_partitioning) {
+                         context.initial_partitioning.refinement.global.fm_algorithm = fmAlgorithmFromString(type);
+                       } else {
+                         context.refinement.global.fm_algorithm = fmAlgorithmFromString(type);
+                       }
+                     })->default_value("kway_fm"),
+             "FM Algorithm for the globalized FM local search:\n"
+             "- kway_fm\n"
+             "- unconstrained_fm\n"
+             "- do_nothing")
             ((initial_partitioning ? "i-r-global-fm-seed-nodes" : "r-global-fm-seed-nodes"),
-             po::value<size_t>((initial_partitioning ? &context.initial_partitioning.refinement.global_fm.num_seed_nodes :
-                                &context.refinement.global_fm.num_seed_nodes))->value_name("<size_t>")->default_value(25),
+             po::value<size_t>((initial_partitioning ? &context.initial_partitioning.refinement.global.fm_num_seed_nodes :
+                                &context.refinement.global.fm_num_seed_nodes))->value_name("<size_t>")->default_value(25),
              "Number of nodes to start the 'highly localized FM' with during the globalized FM local search.")
             ((initial_partitioning ? "i-r-global-fm-obey-minimal-parallelism" : "r-global-fm-obey-minimal-parallelism"),
              po::value<bool>(
-                     (initial_partitioning ? &context.initial_partitioning.refinement.global_fm.obey_minimal_parallelism :
-                      &context.refinement.global_fm.obey_minimal_parallelism))->value_name("<bool>")->default_value(true),
+                     (initial_partitioning ? &context.initial_partitioning.refinement.global.fm_obey_minimal_parallelism :
+                      &context.refinement.global.fm_obey_minimal_parallelism))->value_name("<bool>")->default_value(true),
              "If true, then the globalized FM local search stops if more than a certain number of threads are finished.")
+             ((initial_partitioning ? "i-r-global-lp-type" : "r-global-lp-type"),
+              po::value<std::string>()->value_name("<string>")->notifier(
+                      [&, initial_partitioning](const std::string& type) {
+                        if (initial_partitioning) {
+                          context.initial_partitioning.refinement.global.lp_algorithm = labelPropagationAlgorithmFromString(type);
+                        } else {
+                          context.refinement.global.lp_algorithm = labelPropagationAlgorithmFromString(type);
+                        }
+                      })->default_value("label_propagation"),
+              "Label Propagation Algorithm for the globalized label propagation refinement:\n"
+              "- label_propagation\n"
+              "- deterministic\n"
+              "- do_nothing")
+            ((initial_partitioning ? "i-r-global-lp-unconstrained" : "r-global-lp-unconstrained"),
+             po::value<bool>(
+                     (initial_partitioning ? &context.initial_partitioning.refinement.global.lp_unconstrained :
+                      &context.refinement.global.lp_unconstrained))->value_name("<bool>")->default_value(false),
+             "If true, then the unconstrained LP is used for the globalized LP.")
             ((initial_partitioning ? "i-r-rebalancer-type" : "r-rebalancer-type"),
              po::value<std::string>()->value_name("<string>")->notifier(
                      [&, initial_partitioning](const std::string& type) {
                        if (initial_partitioning) {
-                         context.initial_partitioning.refinement.rebalancer = rebalancingAlgorithmFromString(type);
+                         context.initial_partitioning.refinement.rebalancing.algorithm = rebalancingAlgorithmFromString(type);
                        } else {
-                         context.refinement.rebalancer = rebalancingAlgorithmFromString(type);
+                         context.refinement.rebalancing.algorithm = rebalancingAlgorithmFromString(type);
                        }
                      })->default_value("do_nothing"),
              "Rebalancer Algorithm:\n"
+             "- deterministic\n"
              "- simple_rebalancer\n"
              "- advanced_rebalancer\n"
-             "- do_nothing");
+             "- do_nothing")
+            ((initial_partitioning ? "i-r-det-rebalancing-deadzone": "r-det-rebalancing-deadzone"),
+            po::value<double>((!initial_partitioning ? &context.refinement.rebalancing.det_relative_deadzone_size :
+                              &context.initial_partitioning.refinement.rebalancing.det_relative_deadzone_size))->value_name(
+                    "<double>")->default_value(1.0),
+             "Relative deadzone size for deterministic rebalancer")
+            ((initial_partitioning ? "i-r-det-rebalancing-heavy-vertex-exclusion": "r-det-rebalancing-heavy-vertex-exclusion"),
+            po::value<double>((!initial_partitioning ? &context.refinement.rebalancing.det_heavy_vertex_exclusion_factor :
+                              &context.initial_partitioning.refinement.rebalancing.det_heavy_vertex_exclusion_factor))->value_name(
+                    "<double>")->default_value(1.5),
+             "Relative weight threshold for heavy vertices which are ignored in deterministic rebalancing.")
+            ((initial_partitioning ? "i-r-max-det-rebalancing-rounds": "r-max-det-rebalancing-rounds"),
+            po::value<size_t>((!initial_partitioning ? &context.refinement.rebalancing.det_max_rounds :
+                              &context.initial_partitioning.refinement.rebalancing.det_max_rounds))->value_name(
+                    "<size_t>")->default_value(0),
+            "Deterministic rebalancer: maximum number of iterations per rebalancing call");
     return options;
   }
 
@@ -573,8 +660,8 @@ namespace mt_kahypar {
                       &context.refinement.flows.alpha))->value_name("<double>"),
              "Size constraint for flow problem: (1 + alpha * epsilon) * c(V) / k - c(V_1) (alpha = r-flow-scaling)")
             ((initial_partitioning ? "i-r-flow-max-num-pins" : "r-flow-max-num-pins"),
-             po::value<uint32_t>((initial_partitioning ? &context.initial_partitioning.refinement.flows.max_num_pins :
-                      &context.refinement.flows.max_num_pins))->value_name("<uint32_t>"),
+             po::value<HypernodeID>((initial_partitioning ? &context.initial_partitioning.refinement.flows.max_num_pins :
+                      &context.refinement.flows.max_num_pins))->value_name("<int>"),
              "Maximum number of pins a flow problem is allowed to contain")
             ((initial_partitioning ? "i-r-flow-find-most-balanced-cut" : "r-flow-find-most-balanced-cut"),
              po::value<bool>((initial_partitioning ? &context.initial_partitioning.refinement.flows.find_most_balanced_cut :
@@ -736,10 +823,41 @@ namespace mt_kahypar {
   }
 
 
+  po::options_description getIniOptionsDescription(Context& context) {
+    const int num_columns = 80;
+    po::options_description general_options =
+            createGeneralOptionsDescription(context, num_columns);
+    po::options_description preprocessing_options =
+            createPreprocessingOptionsDescription(context, num_columns);
+    po::options_description coarsening_options =
+            createCoarseningOptionsDescription(context, num_columns);
+    po::options_description initial_paritioning_options =
+            createInitialPartitioningOptionsDescription(context, num_columns);
+    po::options_description refinement_options =
+            createRefinementOptionsDescription(context, num_columns, false);
+    po::options_description flow_options =
+            createFlowRefinementOptionsDescription(context, num_columns, false);
+    po::options_description mapping_options =
+            createMappingOptionsDescription(context, num_columns);
+    po::options_description shared_memory_options =
+            createSharedMemoryOptionsDescription(context, num_columns);
 
-  void processCommandLineInput(Context& context, int argc, char *argv[]) {
+    po::options_description ini_line_options;
+    ini_line_options.add(general_options)
+            .add(preprocessing_options)
+            .add(coarsening_options)
+            .add(initial_paritioning_options)
+            .add(refinement_options)
+            .add(flow_options)
+            .add(mapping_options)
+            .add(shared_memory_options);
+
+    return ini_line_options;
+  }
+
+
+  void processCommandLineInput(Context& context, int argc, char *argv[], const std::vector<option>* preset_option_list) {
     const int num_columns = platform::getTerminalWidth();
-
 
     po::options_description required_options("Required Options", num_columns);
     required_options.add_options()
@@ -810,24 +928,31 @@ namespace mt_kahypar {
 
     po::notify(cmd_vm);
 
+    po::options_description ini_line_options;
+    ini_line_options.add(general_options)
+            .add(preprocessing_options)
+            .add(coarsening_options)
+            .add(initial_paritioning_options)
+            .add(refinement_options)
+            .add(flow_options)
+            .add(mapping_options)
+            .add(shared_memory_options);
     if ( context.partition.preset_file != "" ) {
+      // load from preset file
       std::ifstream file(context.partition.preset_file.c_str());
       if (!file) {
         throw InvalidInputException(
           "Could not load context file at: " + context.partition.preset_file);
       }
 
-      po::options_description ini_line_options;
-      ini_line_options.add(general_options)
-              .add(preprocessing_options)
-              .add(coarsening_options)
-              .add(initial_paritioning_options)
-              .add(refinement_options)
-              .add(flow_options)
-              .add(mapping_options)
-              .add(shared_memory_options);
+      po::store(po::parse_config_file(file, ini_line_options, false), cmd_vm);
+      po::notify(cmd_vm);
+    } else if ( preset_option_list != nullptr ) {
+      // load from specified preset type
+      po::basic_parsed_options<char> options(&ini_line_options);
+      options.options = *preset_option_list;
 
-      po::store(po::parse_config_file(file, ini_line_options, true), cmd_vm);
+      po::store(options, cmd_vm);
       po::notify(cmd_vm);
     }
 
@@ -861,45 +986,43 @@ namespace mt_kahypar {
   }
 
 
-  void parseIniToContext(Context& context, const std::string& ini_filename) {
+  void parseIniToContext(Context& context, const std::string& ini_filename, bool disable_verbose_output) {
     std::ifstream file(ini_filename.c_str());
     if (!file) {
       throw InvalidInputException(
         "Could not load context file at: " + ini_filename);
     }
-    const int num_columns = 80;
-
-    po::options_description general_options =
-            createGeneralOptionsDescription(context, num_columns);
-    po::options_description preprocessing_options =
-            createPreprocessingOptionsDescription(context, num_columns);
-    po::options_description coarsening_options =
-            createCoarseningOptionsDescription(context, num_columns);
-    po::options_description initial_paritioning_options =
-            createInitialPartitioningOptionsDescription(context, num_columns);
-    po::options_description refinement_options =
-            createRefinementOptionsDescription(context, num_columns, false);
-    po::options_description flow_options =
-            createFlowRefinementOptionsDescription(context, num_columns, false);
-    po::options_description mapping_options =
-            createMappingOptionsDescription(context, num_columns);
-    po::options_description shared_memory_options =
-            createSharedMemoryOptionsDescription(context, num_columns);
-
     po::variables_map cmd_vm;
-    po::options_description ini_line_options;
-    ini_line_options.add(general_options)
-            .add(preprocessing_options)
-            .add(coarsening_options)
-            .add(initial_paritioning_options)
-            .add(refinement_options)
-            .add(flow_options)
-            .add(mapping_options)
-            .add(shared_memory_options);
+    po::options_description ini_line_options = getIniOptionsDescription(context);
 
-    po::store(po::parse_config_file(file, ini_line_options, true), cmd_vm);
+    po::store(po::parse_config_file(file, ini_line_options, false), cmd_vm);
     po::notify(cmd_vm);
 
+    if (disable_verbose_output) {
+      bool verbose_is_manually_set = !cmd_vm.find("verbose")->second.defaulted();
+      if (!verbose_is_manually_set) {
+        context.partition.verbose_output = false;
+      }
+    }
+    if (context.partition.deterministic) {
+      context.preprocessing.stable_construction_of_incident_edges = true;
+    }
+  }
+
+
+  void presetToContext(Context& context, std::vector<option>& option_list, bool disable_verbose_output) {
+
+    po::variables_map cmd_vm;
+    po::options_description ini_line_options = getIniOptionsDescription(context);
+    po::basic_parsed_options<char> options(&ini_line_options);
+    options.options = option_list;
+
+    po::store(options, cmd_vm);
+    po::notify(cmd_vm);
+
+    if (disable_verbose_output) {
+      context.partition.verbose_output = false;
+    }
     if (context.partition.deterministic) {
       context.preprocessing.stable_construction_of_incident_edges = true;
     }

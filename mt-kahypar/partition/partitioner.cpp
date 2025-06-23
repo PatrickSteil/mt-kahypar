@@ -27,8 +27,8 @@
 
 #include "partitioner.h"
 
-#include "tbb/parallel_sort.h"
-#include "tbb/parallel_reduce.h"
+#include <tbb/parallel_sort.h>
+#include <tbb/parallel_reduce.h>
 
 #include "mt-kahypar/definitions.h"
 #include "mt-kahypar/io/partitioning_output.h"
@@ -132,7 +132,7 @@ namespace mt_kahypar {
     if ( hypergraph.hasFixedVertices() ) {
       if ( context.partition.mode == Mode::deep_multilevel ||
            context.initial_partitioning.mode == Mode::deep_multilevel ) {
-        throw NonSupportedOperationException(
+        throw UnsupportedOperationException(
           "Deep multilevel partitioning scheme does not support fixed vertices!");
       }
     }
@@ -309,10 +309,11 @@ namespace mt_kahypar {
                   << ", but it is assigned to block" << from << "!"
                   << "It is now moved to its fixed vertex block." << END;
             }
-            partitioned_hg.changeNodePart(hn, from, to, NOOP_FUNC, true);
+            partitioned_hg.changeNodePartNoSync(hn, from, to, true);
           }
         }
       });
+      partitioned_hg.resetEdgeSynchronization();
     }
   }
 

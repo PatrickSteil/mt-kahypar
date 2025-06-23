@@ -32,10 +32,10 @@
 #include <atomic>
 #include <sstream>
 #include <chrono>
-#if defined(__linux__) or defined(__APPLE__)
-#include <sys/ioctl.h>
-#elif _WIN32
+#if _WIN32
 #include <windows.h>
+#else
+#include <sys/ioctl.h>
 #endif
 #include <stdio.h>
 #include <unistd.h>
@@ -50,7 +50,7 @@ class ProgressBar {
 
  public:
   explicit ProgressBar(const size_t expected_count,
-                       const HyperedgeWeight objective,
+                       const int64_t objective,
                        const bool enable = true) :
     _display_mutex(),
     _count(0),
@@ -60,14 +60,14 @@ class ProgressBar {
     _objective(objective),
     _progress_bar_size(0),
     _enable(enable) {
-    #if defined(__linux__) or defined(__APPLE__)
-    struct winsize w;
-    ioctl(STDOUT_FILENO, TIOCGWINSZ, &w);
-    _progress_bar_size = w.ws_col / 2;
-    #elif _WIN32
+    #if _WIN32
     CONSOLE_SCREEN_BUFFER_INFO csbi;
     GetConsoleScreenBufferInfo(GetStdHandle(STD_OUTPUT_HANDLE), &csbi);
     _progress_bar_size = (csbi.srWindow.Right - csbi.srWindow.Left + 1)/2;
+    #else
+    struct winsize w;
+    ioctl(STDOUT_FILENO, TIOCGWINSZ, &w);
+    _progress_bar_size = w.ws_col / 2;
     #endif
     display_progress();
   }
@@ -105,11 +105,11 @@ class ProgressBar {
     return _count;
   }
 
-  void setObjective(const HyperedgeWeight objective) {
+  void setObjective(const int64_t objective) {
     _objective = objective;
   }
 
-  void addToObjective(const HyperedgeWeight delta) {
+  void addToObjective(const int64_t delta) {
     __atomic_fetch_add(&_objective, delta, __ATOMIC_RELAXED);
   }
 
@@ -191,7 +191,7 @@ class ProgressBar {
   std::atomic<size_t> _next_tic_count;
   size_t _expected_count;
   HighResClockTimepoint _start;
-  HyperedgeWeight _objective;
+  int64_t _objective;
   size_t _progress_bar_size;
   bool _enable;
 };

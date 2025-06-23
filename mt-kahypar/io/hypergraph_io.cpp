@@ -36,17 +36,17 @@
 #include <fcntl.h>
 #include <sys/stat.h>
 
-#if defined(__linux__) or defined(__APPLE__)
-#include <sys/mman.h>
-#include <unistd.h>
-#elif _WIN32
+#if _WIN32
 #include <windows.h>
 #include <process.h>
 #include <memoryapi.h>
+#else
+#include <sys/mman.h>
+#include <unistd.h>
 #endif
 
 
-#include "tbb/parallel_for.h"
+#include <tbb/parallel_for.h>
 
 #include "mt-kahypar/definitions.h"
 #include "mt-kahypar/partition/context_enum_classes.h"
@@ -55,17 +55,7 @@
 
 namespace mt_kahypar::io {
 
-  #if defined(__linux__) or defined(__APPLE__)
-  struct FileHandle {
-    int fd;
-    char* mapped_file;
-    size_t length;
-
-    void closeHandle() {
-      close(fd);
-    }
-  };
-  #elif _WIN32
+  #if _WIN32
   struct FileHandle {
     HANDLE hFile;
     HANDLE hMem;
@@ -77,13 +67,23 @@ namespace mt_kahypar::io {
       CloseHandle(hMem);
     }
   };
+  #else
+  struct FileHandle {
+    int fd;
+    char* mapped_file;
+    size_t length;
+
+    void closeHandle() {
+      close(fd);
+    }
+  };
   #endif
 
   size_t file_size(const std::string& filename) {
     struct stat stat_buf;
     const int res = stat( filename.c_str(), &stat_buf);
     if (res < 0) {
-      throw InvalidInputException("Could not open:" + filename);
+      throw InvalidInputException("Could not open: " + filename);
     }
     return static_cast<size_t>(stat_buf.st_size);
   }
@@ -130,7 +130,7 @@ namespace mt_kahypar::io {
       if ( handle.mapped_file == NULL ) {
         throw SystemException("Failed to map file to main memory:" + filename);
       }
-    #elif defined(__linux__) or defined(__APPLE__)
+    #else
       handle.fd = open(filename.c_str(), O_RDONLY);
       if ( handle.fd < -1 ) {
         throw InvalidInputException("Could not open: " + filename);
@@ -148,7 +148,7 @@ namespace mt_kahypar::io {
   void munmap_file(FileHandle& handle) {
     #ifdef _WIN32
     UnmapViewOfFile(handle.mapped_file);
-    #elif defined(__linux__) or defined(__APPLE__)
+    #else
     munmap(handle.mapped_file, handle.length);
     #endif
     handle.closeHandle();
@@ -438,6 +438,11 @@ namespace mt_kahypar::io {
 
     // Read Hypernode Weights
     readHypernodeWeights(handle.mapped_file, pos, handle.length, num_hypernodes, type, hypernodes_weight);
+
+    // Check the end of the file
+    while ( handle.mapped_file[pos] == '%' ) {
+      goto_next_line(handle.mapped_file, pos, handle.length);
+    }
     ASSERT(pos == handle.length);
 
     munmap_file(handle);
@@ -588,7 +593,7 @@ namespace mt_kahypar::io {
       while ( current_vertex_id < last_vertex_id ) {
         // Skip Comments
         ASSERT(current_pos < current_end);
-        while ( mapped_file[pos] == '%' ) {
+        while ( mapped_file[current_pos] == '%' ) {
           goto_next_line(mapped_file, current_pos, current_end);
           ASSERT(current_pos < current_end);
         }
@@ -643,45 +648,55 @@ namespace mt_kahypar::io {
     // Read Vertices
     readVertices(handle.mapped_file, pos, handle.length, num_edges, num_vertices,
       has_edge_weights, has_vertex_weights, edges, edges_weight, vertices_weight);
+
+    // Check the end of the file
+    while ( handle.mapped_file[pos] == '%' ) {
+      goto_next_line(handle.mapped_file, pos, handle.length);
+    }
     ASSERT(pos == handle.length);
 
     munmap_file(handle);
   }
 
-  void readPartitionFile(const std::string& filename, std::vector<PartitionID>& partition) {
-    ASSERT(!filename.empty(), "No filename for partition file specified");
-    ASSERT(partition.empty(), "Partition vector is not empty");
-    std::ifstream file(filename);
-    if (file) {
-      int part;
-      while (file >> part) {
-        partition.push_back(part);
-      }
-      file.close();
-    } else {
-      std::cerr << "Error: File not found: " << std::endl;
-    }
-  }
-
-  void readPartitionFile(const std::string& filename, PartitionID* partition) {
+  template<typename InitFunc>
+  void readPartitionFileImpl(const std::string& filename, HypernodeID num_nodes, InitFunc init_func) {
     ASSERT(!filename.empty(), "No filename for partition file specified");
     std::ifstream file(filename);
     if (file) {
+      PartitionID* partition = init_func();
       int part;
       HypernodeID hn = 0;
       while (file >> part) {
+        if (hn >= num_nodes) {
+          throw InvalidInputException(std::string("Input file has more entries than the number of nodes: ") + filename);
+        }
         partition[hn++] = part;
       }
       file.close();
+      if (hn < num_nodes) {
+        throw InvalidInputException(std::string("Input file has less entries than the number of nodes: ") + filename);
+      }
     } else {
-      std::cerr << "Error: File not found: " << std::endl;
+      throw InvalidInputException(std::string("File not found: ") + filename);
     }
+  }
+
+  void readPartitionFile(const std::string& filename, HypernodeID num_nodes, std::vector<PartitionID>& partition) {
+    readPartitionFileImpl(filename, num_nodes, [&]{
+      partition.clear();
+      partition.resize(num_nodes);
+      return partition.data();
+    });
+  }
+
+  void readPartitionFile(const std::string& filename, HypernodeID num_nodes, PartitionID* partition) {
+    readPartitionFileImpl(filename, num_nodes, [=]{ return partition; });
   }
 
   template<typename PartitionedHypergraph>
   void writePartitionFile(const PartitionedHypergraph& phg, const std::string& filename) {
     if (filename.empty()) {
-      LOG << "No filename for partition file specified";
+      throw InvalidInputException("No filename for output partition file specified");
     } else {
       std::ofstream out_stream(filename.c_str());
       std::vector<PartitionID> partition(phg.initialNumNodes(), -1);

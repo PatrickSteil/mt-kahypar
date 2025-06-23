@@ -28,7 +28,7 @@
 
 #include <atomic>
 
-#include "tbb/parallel_invoke.h"
+#include <tbb/parallel_invoke.h>
 
 #include "tests/datastructures/hypergraph_fixtures.h"
 #include "mt-kahypar/utils/utilities.h"
@@ -250,7 +250,7 @@ typedef ::testing::Types<TestConfig<StaticHypergraphTypeTraits, RandomInitialPar
                          TestConfig<StaticHypergraphTypeTraits, LabelPropagationInitialPartitioner, InitialPartitioningAlgorithm::label_propagation, 5, 2>,
                          TestConfig<StaticHypergraphTypeTraits, LabelPropagationInitialPartitioner, InitialPartitioningAlgorithm::label_propagation, 5, 5> > TestConfigs;
 
-TYPED_TEST_CASE(AFlatInitialPartitionerTest, TestConfigs);
+TYPED_TEST_SUITE(AFlatInitialPartitionerTest, TestConfigs);
 
 TYPED_TEST(AFlatInitialPartitionerTest, HasValidImbalance) {
   this->execute();

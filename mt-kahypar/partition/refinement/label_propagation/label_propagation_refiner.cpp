@@ -27,7 +27,7 @@
 
 #include "mt-kahypar/partition/refinement/label_propagation/label_propagation_refiner.h"
 
-#include "tbb/parallel_for.h"
+#include <tbb/parallel_for.h>
 
 #include "mt-kahypar/definitions.h"
 #include "mt-kahypar/partition/metrics.h"
@@ -112,8 +112,7 @@ namespace mt_kahypar {
     labelPropagation(hypergraph, best_metrics);
 
     HEAVY_REFINEMENT_ASSERT(hypergraph.checkTrackedPartitionInformation(_gain_cache));
-    HEAVY_REFINEMENT_ASSERT(best_metrics.quality ==
-      metrics::quality(hypergraph, _context,
+    ASSERT(best_metrics.quality == metrics::quality(hypergraph, _context,
         !_context.refinement.label_propagation.execute_sequential),
       V(best_metrics.quality) << V(metrics::quality(hypergraph, _context,
           !_context.refinement.label_propagation.execute_sequential)));
@@ -175,12 +174,14 @@ namespace mt_kahypar {
       });
     }
 
+    bool did_rebalance = false;
     bool should_stop = false;
     if ( unconstrained_lp ) {
       if (!metrics::isBalanced(hypergraph, _context)) {
         should_stop = applyRebalancing(hypergraph, best_metrics, current_metrics, rebalance_moves);
         // rebalancer might initialize the gain cache
-        should_update_gain_cache = GainCache::invalidates_entries && _gain_cache.isInitialized();
+        should_update_gain_cache = GainCache::invalidates_entries && _gain_cache.isInitialized() && should_stop;
+        did_rebalance = true;
       } else {
         should_update_gain_cache = false;
       }
@@ -203,7 +204,13 @@ namespace mt_kahypar {
       });
     }
 
-    ASSERT(current_metrics.quality <= best_metrics.quality);
+    // Unfortunately, in the default case without rebalancing and rollback, we can not guarantee that the quality does
+    // not decrease. Race conditions during applying/reverting moves can lead to a situation where reverting some moves
+    // looks beneficial but results in a net negative. This is however so rare in practice that we can accept it instead
+    // of investing more running time to fix it.
+    ASSERT(!did_rebalance || current_metrics.quality <= best_metrics.quality ||
+            (!_old_partition_is_balanced && current_metrics.imbalance < best_metrics.imbalance));
+    unused(did_rebalance);
     const Gain old_quality = best_metrics.quality;
     best_metrics = current_metrics;
 

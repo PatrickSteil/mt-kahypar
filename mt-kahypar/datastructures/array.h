@@ -31,9 +31,9 @@
 #include <memory>
 #include <iterator>
 
-#include "tbb/parallel_for.h"
-#include "tbb/scalable_allocator.h"
-#include "tbb//parallel_invoke.h"
+#include <tbb/parallel_for.h>
+#include <tbb/scalable_allocator.h>
+#include <tbb/parallel_invoke.h>
 
 #include "mt-kahypar/macros.h"
 #include "mt-kahypar/parallel/memory_pool.h"
@@ -56,8 +56,7 @@ class Array {
       using difference_type = std::ptrdiff_t;
 
       ArrayIterator() : _ptr(nullptr) { }
-      ArrayIterator(T* ptr) : _ptr(ptr) { }
-      ArrayIterator(const ArrayIterator& other) : _ptr(other._ptr) { }
+      explicit ArrayIterator(T* ptr) : _ptr(ptr) { }
 
       reference operator*() const {
         return *_ptr;
@@ -143,6 +142,9 @@ class Array {
         return (_ptr - other._ptr);
       }
 
+      friend ArrayIterator operator+(const difference_type& n, const ArrayIterator& it) {
+        return it + n;
+      }
     private:
       T* _ptr;
 

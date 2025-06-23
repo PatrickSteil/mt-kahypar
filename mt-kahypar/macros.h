@@ -29,20 +29,20 @@
 #include <type_traits>
 
 #if defined(MT_KAHYPAR_LIBRARY_MODE) ||                                        \
-    !defined(KAHYPAR_ENABLE_THREAD_PINNING) || defined(__APPLE__)
-#include "tbb/task_arena.h"
+    !defined(KAHYPAR_ENABLE_THREAD_PINNING)
+#include <tbb/task_arena.h>
 // If we use the C or Python interface or thread pinning is disabled, the cpu ID
 // to which the current thread is assigned to is not unique. We therefore use
 // the slot index of the current task arena as unique thread ID. Note that the
 // ID can be negative if the task scheduler is not initialized.
 #define THREAD_ID std::max(0, tbb::this_task_arena::current_thread_index())
 #else
-#ifdef __linux__
-#include <sched.h>
-#define THREAD_ID sched_getcpu()
-#elif _WIN32
+#ifdef _WIN32
 #include <processthreadsapi.h>
 #define THREAD_ID GetCurrentProcessorNumber()
+#else
+#include <sched.h>
+#define THREAD_ID sched_getcpu()
 #endif
 #endif
 
@@ -62,11 +62,6 @@
 #else
 #define MT_KAHYPAR_ATTRIBUTE_ALWAYS_INLINE
 #endif
-
-#define HEAVY_ASSERT0(cond)                                                    \
-  !(enable_heavy_assert) ? (void)0 : [&]() { ASSERT(cond); }()
-#define HEAVY_ASSERT1(cond, msg)                                               \
-  !(enable_heavy_assert) ? (void)0 : [&]() { ASSERT(cond, msg); }()
 
 #ifdef KAHYPAR_ENABLE_HEAVY_PREPROCESSING_ASSERTIONS
 #define HEAVY_PREPROCESSING_ASSERT_1(cond) ASSERT(cond)
@@ -99,9 +94,6 @@
 #define HEAVY_REFINEMENT_ASSERT_1(cond) HEAVY_ASSERT0(cond)
 #define HEAVY_REFINEMENT_ASSERT_2(cond, msg) HEAVY_ASSERT1(cond, msg)
 #endif
-
-#define HEAVY_ASSERT_(TYPE, N) HEAVY_##TYPE##_ASSERT_##N
-#define HEAVY_ASSERT_EVAL(TYPE, N) HEAVY_ASSERT_(TYPE, N)
 
 // Heavy assertions are assertions which increase the complexity of the scope
 // which they are executed in by an polynomial factor. In debug mode you are
@@ -170,6 +162,12 @@
 #define ENABLE_EXPERIMENTAL_FEATURES(X) X
 #else
 #define ENABLE_EXPERIMENTAL_FEATURES(X)
+#endif
+
+#ifdef KAHYPAR_USE_ASSERTIONS
+#define ENABLE_ASSERTIONS(X) X
+#else
+#define ENABLE_ASSERTIONS(X)
 #endif
 
 #ifdef KAHYPAR_ENABLE_LARGE_K_PARTITIONING_FEATURES

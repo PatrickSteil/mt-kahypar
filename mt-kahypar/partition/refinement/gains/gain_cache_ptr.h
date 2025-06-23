@@ -86,7 +86,7 @@ class GainCachePtr {
       #endif
       case GainPolicy::none: break;
     }
-    ERR("No gain policy set");
+    throw InvalidParameterException("No gain policy set");
   }
 
   template<typename Hypergraph, typename F>
@@ -120,7 +120,7 @@ class GainCachePtr {
         default: break;
       }
     }
-    ERR("No gain policy set");
+    throw InvalidParameterException("No gain policy set");
   }
 
   static gain_cache_t constructGainCache(const Context& context) {
@@ -200,7 +200,7 @@ class GainCachePtr {
   static GainCache& cast(gain_cache_t gain_cache) {
     if ( gain_cache.type != GainCache::TYPE ) {
       std::stringstream ss;
-      ss << "Cannot cast" << gain_cache.type << "to" << GainCache::TYPE;
+      ss << "Cannot cast " << gain_cache.type << " to " << GainCache::TYPE;
       throw InvalidInputException(ss.str());
     }
     return *reinterpret_cast<GainCache*>(gain_cache.gain_cache);

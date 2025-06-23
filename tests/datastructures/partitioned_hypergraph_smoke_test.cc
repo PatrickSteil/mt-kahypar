@@ -29,10 +29,10 @@
 #include <boost/range/irange.hpp>
 #include "gmock/gmock.h"
 
-#include "tbb/blocked_range.h"
-#include "tbb/enumerable_thread_specific.h"
-#include "tbb/task_arena.h"
-#include "tbb/task_group.h"
+#include <tbb/blocked_range.h>
+#include <tbb/enumerable_thread_specific.h>
+#include <tbb/task_arena.h>
+#include <tbb/task_group.h>
 
 #include "mt-kahypar/definitions.h"
 #include "mt-kahypar/io/hypergraph_factory.h"
@@ -130,7 +130,7 @@ typedef ::testing::Types<TestConfig<StaticHypergraphTypeTraits, 2, Objective::cu
                          ENABLE_HIGHEST_QUALITY(COMMA TestConfig<DynamicHypergraphTypeTraits COMMA 128 COMMA Objective::km1>)
                          ENABLE_LARGE_K(COMMA TestConfig<LargeKHypergraphTypeTraits COMMA 128 COMMA Objective::km1>)> TestConfigs;
 
-TYPED_TEST_CASE(AConcurrentHypergraph, TestConfigs);
+TYPED_TEST_SUITE(AConcurrentHypergraph, TestConfigs);
 
 template<typename HyperGraph>
 void moveAllNodesOfHypergraphRandom(HyperGraph& hypergraph,

@@ -25,6 +25,8 @@
  * SOFTWARE.
  ******************************************************************************/
 
+#include "register_coarsening_algorithms.h"
+
 #include "kahypar-resources/meta/registrar.h"
 #include "kahypar-resources/meta/static_multi_dispatch_factory.h"
 #include "kahypar-resources/meta/typelist.h"
@@ -35,6 +37,7 @@
 #endif
 #include "mt-kahypar/partition/coarsening/multilevel_coarsener.h"
 #include "mt-kahypar/partition/coarsening/deterministic_multilevel_coarsener.h"
+#include "mt-kahypar/partition/coarsening/do_nothing_coarsener.h"
 #include "mt-kahypar/partition/coarsening/policies/rating_acceptance_policy.h"
 #include "mt-kahypar/partition/coarsening/policies/rating_heavy_node_penalty_policy.h"
 #include "mt-kahypar/partition/context.h"
@@ -62,9 +65,12 @@ using NLevelCoarsenerDispatcher = kahypar::meta::StaticMultiDispatchFactory<NLev
                                                                                                     AcceptancePolicies> >;
 #endif
 
+using DoNothingCoarsenerDispatcher = kahypar::meta::StaticMultiDispatchFactory<DoNothingCoarsener,
+                                                                               ICoarsener,
+                                                                               kahypar::meta::Typelist<TypeTraitsList>>;
 
 #define REGISTER_DISPATCHED_COARSENER(id, dispatcher, ...)                                                    \
-  static kahypar::meta::Registrar<CoarsenerFactory> register_ ## dispatcher(                                  \
+  kahypar::meta::Registrar<CoarsenerFactory> register_ ## dispatcher(                                         \
     id,                                                                                                       \
     [](mt_kahypar_hypergraph_t hypergraph, const Context& context, uncoarsening_data_t* uncoarseningData) {   \
     return dispatcher::create(                                                                                \
@@ -74,33 +80,41 @@ using NLevelCoarsenerDispatcher = kahypar::meta::StaticMultiDispatchFactory<NLev
   })
 
 
-REGISTER_DISPATCHED_COARSENER(CoarseningAlgorithm::multilevel_coarsener,
-                              MultilevelCoarsenerDispatcher,
-                              kahypar::meta::PolicyRegistry<mt_kahypar_partition_type_t>::getInstance().getPolicy(
-                                context.partition.partition_type),
-                              kahypar::meta::PolicyRegistry<RatingFunction>::getInstance().getPolicy(
-                                context.coarsening.rating.rating_function),
-                              kahypar::meta::PolicyRegistry<HeavyNodePenaltyPolicy>::getInstance().getPolicy(
-                                context.coarsening.rating.heavy_node_penalty_policy),
-                              kahypar::meta::PolicyRegistry<AcceptancePolicy>::getInstance().getPolicy(
-                                context.coarsening.rating.acceptance_policy));
+void register_coarsening_algorithms() {
+  REGISTER_DISPATCHED_COARSENER(CoarseningAlgorithm::multilevel_coarsener,
+                                MultilevelCoarsenerDispatcher,
+                                kahypar::meta::PolicyRegistry<mt_kahypar_partition_type_t>::getInstance().getPolicy(
+                                  context.partition.partition_type),
+                                kahypar::meta::PolicyRegistry<RatingFunction>::getInstance().getPolicy(
+                                  context.coarsening.rating.rating_function),
+                                kahypar::meta::PolicyRegistry<HeavyNodePenaltyPolicy>::getInstance().getPolicy(
+                                  context.coarsening.rating.heavy_node_penalty_policy),
+                                kahypar::meta::PolicyRegistry<AcceptancePolicy>::getInstance().getPolicy(
+                                  context.coarsening.rating.acceptance_policy));
 
-#ifdef KAHYPAR_ENABLE_HIGHEST_QUALITY_FEATURES
-REGISTER_DISPATCHED_COARSENER(CoarseningAlgorithm::nlevel_coarsener,
-                              NLevelCoarsenerDispatcher,
-                              kahypar::meta::PolicyRegistry<mt_kahypar_partition_type_t>::getInstance().getPolicy(
-                                context.partition.partition_type),
-                              kahypar::meta::PolicyRegistry<RatingFunction>::getInstance().getPolicy(
-                                context.coarsening.rating.rating_function),
-                              kahypar::meta::PolicyRegistry<HeavyNodePenaltyPolicy>::getInstance().getPolicy(
-                                context.coarsening.rating.heavy_node_penalty_policy),
-                              kahypar::meta::PolicyRegistry<AcceptancePolicy>::getInstance().getPolicy(
-                                context.coarsening.rating.acceptance_policy));
-#endif
+  #ifdef KAHYPAR_ENABLE_HIGHEST_QUALITY_FEATURES
+  REGISTER_DISPATCHED_COARSENER(CoarseningAlgorithm::nlevel_coarsener,
+                                NLevelCoarsenerDispatcher,
+                                kahypar::meta::PolicyRegistry<mt_kahypar_partition_type_t>::getInstance().getPolicy(
+                                  context.partition.partition_type),
+                                kahypar::meta::PolicyRegistry<RatingFunction>::getInstance().getPolicy(
+                                  context.coarsening.rating.rating_function),
+                                kahypar::meta::PolicyRegistry<HeavyNodePenaltyPolicy>::getInstance().getPolicy(
+                                  context.coarsening.rating.heavy_node_penalty_policy),
+                                kahypar::meta::PolicyRegistry<AcceptancePolicy>::getInstance().getPolicy(
+                                  context.coarsening.rating.acceptance_policy));
+  #endif
 
-REGISTER_DISPATCHED_COARSENER(CoarseningAlgorithm::deterministic_multilevel_coarsener,
-                              DeterministicCoarsenerDispatcher,
-                              kahypar::meta::PolicyRegistry<mt_kahypar_partition_type_t>::getInstance().getPolicy(
-                                context.partition.partition_type));
+  REGISTER_DISPATCHED_COARSENER(CoarseningAlgorithm::deterministic_multilevel_coarsener,
+                                DeterministicCoarsenerDispatcher,
+                                kahypar::meta::PolicyRegistry<mt_kahypar_partition_type_t>::getInstance().getPolicy(
+                                  context.partition.partition_type));
+
+  REGISTER_DISPATCHED_COARSENER(CoarseningAlgorithm::do_nothing_coarsener,
+                                DoNothingCoarsenerDispatcher,
+                                kahypar::meta::PolicyRegistry<mt_kahypar_partition_type_t>::getInstance().getPolicy(
+                                  context.partition.partition_type));
+
+}
 
 }  // namespace mt_kahypar

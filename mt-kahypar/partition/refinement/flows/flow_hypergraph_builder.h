@@ -27,8 +27,8 @@
 
 #pragma once
 
-#include "datastructure/flow_hypergraph.h"
-
+#include "WHFC/datastructure/flow_hypergraph.h"
+#include "mt-kahypar/parallel/stl/scalable_vector.h"
 #include "mt-kahypar/macros.h"
 
 namespace mt_kahypar {

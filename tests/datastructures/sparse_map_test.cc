@@ -29,8 +29,8 @@
 #include <mt-kahypar/macros.h>
 
 #include "gmock/gmock.h"
-#include "tbb/task_group.h"
-#include "tbb/parallel_invoke.h"
+#include <tbb/task_group.h>
+#include <tbb/parallel_invoke.h>
 
 #include "mt-kahypar/datastructures/sparse_map.h"
 #include "mt-kahypar/datastructures/concurrent_flat_map.h"
@@ -47,7 +47,7 @@ struct ADynamicSparseMap : public Test {
 
 using DynamicSparseMapTestTypes = ::testing::Types<DynamicSparseMap<size_t, size_t>, DynamicFlatMap<size_t, size_t>>;
 
-TYPED_TEST_CASE(ADynamicSparseMap, DynamicSparseMapTestTypes);
+TYPED_TEST_SUITE(ADynamicSparseMap, DynamicSparseMapTestTypes);
 
 TYPED_TEST(ADynamicSparseMap, AddsSeveralElements) {
   auto& map = this->map;

@@ -26,7 +26,7 @@
 
 #include "mt-kahypar/partition/mapping/initial_mapping.h"
 
-#include "tbb/parallel_invoke.h"
+#include <tbb/parallel_invoke.h>
 
 #include "mt-kahypar/definitions.h"
 #include "mt-kahypar/partition/mapping/target_graph.h"
@@ -128,7 +128,8 @@ void applyPartition(PartitionedHypergraph& phg,
 template<typename Hypergraph, typename PartitionedHypergraph>
 Hypergraph repairEmptyBlocks(const Hypergraph& contracted_hg,
                              const PartitionedHypergraph& communication_hg,
-                             vec<HypernodeID>& mapping) {
+                             vec<HypernodeID>& mapping,
+                             bool deterministic) {
   using Factory = typename Hypergraph::Factory;
   const PartitionID k = communication_hg.k();
   vec<HypernodeID> block_mapping(contracted_hg.initialNumNodes(), kInvalidHypernode);
@@ -159,7 +160,7 @@ Hypergraph repairEmptyBlocks(const Hypergraph& contracted_hg,
   });
 
   return Factory::construct(num_hypernodes, num_hyperedges,
-    edge_vector, hyperedge_weight.data(), hypernode_weight.data());
+    edge_vector, hyperedge_weight.data(), hypernode_weight.data(), deterministic);
 }
 
 template<typename PartitionedHypergraph>
@@ -175,18 +176,22 @@ void map_to_target_graph(PartitionedHypergraph& communication_hg,
   timer.start_timer("contract_partition", "Contract Partition");
   vec<HypernodeID> mapping(communication_hg.initialNumNodes(), kInvalidHypernode);
   communication_hg.setTargetGraph(&target_graph);
-  communication_hg.doParallelForAllNodes([&](const HypernodeID hn) {
-    mapping[hn] = communication_hg.partID(hn);
-  });
+  if (static_cast<HypernodeID>(context.partition.k) <= communication_hg.initialNumNodes()) {
+    communication_hg.doParallelForAllNodes([&](const HypernodeID hn) {
+      mapping[hn] = communication_hg.partID(hn);
+    });
+  } else {
+    std::iota(mapping.begin(), mapping.end(), 0);
+  }
   // Here, we collapse each block of the communication hypergraph partition into
   // a single node. The contracted hypergraph has exactly k nodes. In the
   // contracted hypergraph node i corresponds to block i of the input
   // communication hypergraph.
-  Hypergraph contracted_hg = communication_hg.hypergraph().contract(mapping);
+  Hypergraph contracted_hg = communication_hg.hypergraph().contract(mapping, context.partition.deterministic);
   if ( contracted_hg.initialNumNodes() < static_cast<HypernodeID>(communication_hg.k()) ) {
     // If the contracted hypergraph has less than k nodes then there must be some empty
     // blocks which we have to fix in the following
-    contracted_hg = repairEmptyBlocks(contracted_hg, communication_hg, mapping);
+    contracted_hg = repairEmptyBlocks(contracted_hg, communication_hg, mapping, context.partition.deterministic);
   }
   PartitionedHypergraph contracted_phg(communication_hg.k(), contracted_hg);
   for ( const HypernodeID& hn : contracted_phg.nodes() ) {

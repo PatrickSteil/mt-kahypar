@@ -30,17 +30,28 @@
 #include <numeric>
 #include <iostream>
 
-#include "tbb/enumerable_thread_specific.h"
+#include <tbb/enumerable_thread_specific.h>
 
-#ifdef __linux__
+#ifdef KAHYPAR_USE_GROWT
+#ifdef __clang__
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wunused-parameter"
+#endif
+#ifdef __GNUC__
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wpedantic"
-#include "allocator/alignedallocator.hpp"
-#include "data-structures/hash_table_mods.hpp"
-#include "data-structures/table_config.hpp"
+#endif
+#include "growt/allocator/alignedallocator.hpp"
+#include "growt/data-structures/hash_table_mods.hpp"
+#include "growt/data-structures/table_config.hpp"
+#ifdef __GNUC__
 #pragma GCC diagnostic pop
-#elif defined(_WIN32) or defined(__APPLE__)
-#include "tbb/concurrent_unordered_map.h"
+#endif
+#ifdef __clang__
+#pragma clang diagnostic pop
+#endif
+#else
+#include <tbb/concurrent_unordered_map.h>
 #endif
 
 #include "mt-kahypar/macros.h"
@@ -53,20 +64,21 @@ namespace mt_kahypar {
 #ifdef KAHYPAR_ENABLE_STEINER_TREE_METRIC
 class TargetGraph {
 
+  static constexpr HyperedgeWeight kInvalidDistance = std::numeric_limits<HyperedgeWeight>::max() / 3;
   static constexpr size_t INITIAL_HASH_TABLE_CAPACITY = 100000;
   static constexpr size_t MEMORY_LIMIT = 100000000;
 
   using PQElement = std::pair<HyperedgeWeight, PartitionID>;
   using PQ = std::priority_queue<PQElement, vec<PQElement>, std::greater<PQElement>>;
 
-  #ifdef __linux__
+  #ifdef KAHYPAR_USE_GROWT
   using hasher_type    = utils_tm::hash_tm::murmur2_hash;
   using allocator_type = growt::AlignedAllocator<>;
   using ConcurrentHashTable = typename growt::table_config<
-    size_t, size_t, hasher_type, allocator_type, hmod::growable, hmod::sync>::table_type;
+    uint64_t, uint64_t, hasher_type, allocator_type, hmod::growable, hmod::sync>::table_type;
   using HashTableHandle = typename ConcurrentHashTable::handle_type;
-  #elif defined(_WIN32) or defined(__APPLE__)
-  using ConcurrentHashTable = tbb::concurrent_unordered_map<size_t, size_t>;
+  #else
+  using ConcurrentHashTable = tbb::concurrent_unordered_map<uint64_t, uint64_t>;
   #endif
 
   struct MSTData {
@@ -102,7 +114,7 @@ class TargetGraph {
     _distances(),
     _local_mst_data(graph.initialNumNodes()),
     _cache(INITIAL_HASH_TABLE_CAPACITY),
-     #ifdef __linux__
+     #ifdef KAHYPAR_USE_GROWT
     _handles([&]() { return getHandle(); }),
      #endif
     _stats() { }
@@ -230,13 +242,24 @@ class TargetGraph {
       (multiplier == UL(_k) ? last_block * _k : 0) : 0;
   }
 
+  MT_KAHYPAR_ATTRIBUTE_ALWAYS_INLINE uint64_t computeHash(const ds::StaticBitset& connectivity_set) const {
+    uint64_t index = 0;
+    for ( const PartitionID block : connectivity_set ) {
+      ASSERT(block != kInvalidPartition && block < _k && block < 64);
+      index |= (static_cast<uint64_t>(1) << block);
+    }
+    return index;
+  }
+
   // ! This function computes an MST on the metric completion of the target graph
   // ! restricted to the blocks in the connectivity set. The metric completion is
   // ! complete graph where each edge {u,v} has a weight equals the shortest path
   // ! connecting u and v. This gives a 2-approximation for steiner tree problem.
   HyperedgeWeight computeWeightOfMSTOnMetricCompletion(const ds::StaticBitset& connectivity_set) const;
 
-  #ifdef __linux__
+  bool inputGraphIsConnected() const;
+
+  #ifdef KAHYPAR_USE_GROWT
   HashTableHandle getHandle() const {
     return _cache.get_handle();
   }
@@ -263,7 +286,7 @@ class TargetGraph {
   // ! Cache stores the weight of MST computations
   mutable ConcurrentHashTable _cache;
 
-  #ifdef __linux__
+  #ifdef KAHYPAR_USE_GROWT
   // ! Handle to access concurrent hash table
   mutable tbb::enumerable_thread_specific<HashTableHandle> _handles;
   #endif
@@ -299,9 +322,39 @@ class TargetGraph {
     return 0;
   }
 
+
+  HyperedgeWeight distance(const ds::Bitset&) const {
+    return 0;
+  }
+
+  HyperedgeWeight distance(const PartitionID, const PartitionID) const {
+    return 0;
+  }
+
+  HyperedgeWeight distanceWithBlock(ds::Bitset&, const PartitionID) const {
+    return 0;
+  }
+
+  HyperedgeWeight distanceWithoutBlock(ds::Bitset&, const PartitionID) const {
+    return 0;
+  }
+
+  HyperedgeWeight distanceAfterExchangingBlocks(ds::Bitset&, const PartitionID, const PartitionID) const {
+    return 0;
+  }
+
+
+  const ds::StaticGraph& graph() const {
+    return _dummy_graph;
+  }
+
   void printStats() const {  }
 
   void printStats(std::stringstream&) const {  }
+
+ private:
+
+  ds::StaticGraph _dummy_graph;
 };
 #endif
 

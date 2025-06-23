@@ -28,7 +28,7 @@
 
 #include <vector>
 
-#include "tbb/enumerable_thread_specific.h"
+#include <tbb/enumerable_thread_specific.h>
 
 #include "mt-kahypar/partition/refinement/gains/gain_computation_base.h"
 #include "mt-kahypar/partition/refinement/gains/steiner_tree/steiner_tree_attributed_gains.h"
@@ -41,12 +41,13 @@ namespace mt_kahypar {
 
 class SteinerTreeGainComputation : public GainComputationBase<SteinerTreeGainComputation, SteinerTreeAttributedGains> {
   using Base = GainComputationBase<SteinerTreeGainComputation, SteinerTreeAttributedGains>;
-  using RatingMap = typename Base::RatingMap;
 
   static constexpr bool enable_heavy_assert = false;
   static constexpr size_t BITS_PER_BLOCK = ds::StaticBitset::BITS_PER_BLOCK;
 
  public:
+  using RatingMap = typename Base::RatingMap;
+
   SteinerTreeGainComputation(const Context& context,
                                 bool disable_randomization = false) :
     Base(context, disable_randomization),

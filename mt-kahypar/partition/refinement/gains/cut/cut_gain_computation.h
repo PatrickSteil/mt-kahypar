@@ -28,7 +28,7 @@
 
 #include <vector>
 
-#include "tbb/enumerable_thread_specific.h"
+#include <tbb/enumerable_thread_specific.h>
 
 #include "mt-kahypar/partition/refinement/gains/gain_computation_base.h"
 #include "mt-kahypar/partition/refinement/gains/cut/cut_attributed_gains.h"
@@ -39,11 +39,12 @@ namespace mt_kahypar {
 
 class CutGainComputation : public GainComputationBase<CutGainComputation, CutAttributedGains> {
   using Base = GainComputationBase<CutGainComputation, CutAttributedGains>;
-  using RatingMap = typename Base::RatingMap;
 
   static constexpr bool enable_heavy_assert = false;
 
  public:
+  using RatingMap = typename Base::RatingMap;
+
   CutGainComputation(const Context& context,
                      bool disable_randomization = false) :
     Base(context, disable_randomization) { }

@@ -120,7 +120,10 @@ struct CoarseningParameters {
   double minimum_shrink_factor = std::numeric_limits<double>::max();
   double maximum_shrink_factor = std::numeric_limits<double>::max();
   size_t vertex_degree_sampling_threshold = std::numeric_limits<size_t>::max();
+
+  // parameters for deterministic coarsening
   size_t num_sub_rounds_deterministic = 16;
+  bool det_resolve_swaps = true;
 
   // Those will be determined dynamically
   HypernodeWeight max_allowed_node_weight = 0;
@@ -133,7 +136,7 @@ std::ostream & operator<< (std::ostream& str, const CoarseningParameters& params
 struct LabelPropagationParameters {
   LabelPropagationAlgorithm algorithm = LabelPropagationAlgorithm::do_nothing;
   size_t maximum_iterations = 1;
-  bool unconstrained = false;
+  mutable bool unconstrained = false;
   bool rebalancing = true;
   bool execute_sequential = false;
   size_t hyperedge_size_activation_threshold = std::numeric_limits<size_t>::max();
@@ -142,8 +145,19 @@ struct LabelPropagationParameters {
 
 std::ostream & operator<< (std::ostream& str, const LabelPropagationParameters& params);
 
+struct JetParameters {
+  JetAlgorithm algorithm = JetAlgorithm::do_nothing;
+  size_t num_iterations = 12;
+  double relative_improvement_threshold = 0.001;
+  size_t dynamic_rounds = 3;
+  double initial_negative_gain_factor = 0.75;
+  double final_negative_gain_factor = 0.0;
+};
+
+std::ostream & operator<< (std::ostream& str, const JetParameters& params);
+
 struct FMParameters {
-  FMAlgorithm algorithm = FMAlgorithm::do_nothing;
+  mutable FMAlgorithm algorithm = FMAlgorithm::do_nothing;
 
   size_t multitry_rounds = 1;
   mutable size_t num_seed_nodes = 1;
@@ -173,14 +187,19 @@ struct FMParameters {
 
 std::ostream& operator<<(std::ostream& out, const FMParameters& params);
 
-struct NLevelGlobalFMParameters {
-  bool use_global_fm = false;   // TODO this should be renamed to something more appropriate: e.g. log_level_fm or refine_after_coarsening_pass
+struct NLevelGlobalRefinementParameters {
+  bool use_global_refinement = false;
   bool refine_until_no_improvement = false;
-  size_t num_seed_nodes = 0;
-  bool obey_minimal_parallelism = false;
+
+  FMAlgorithm fm_algorithm = FMAlgorithm::do_nothing;
+  size_t fm_num_seed_nodes = 0;
+  bool fm_obey_minimal_parallelism = false;
+
+  LabelPropagationAlgorithm lp_algorithm = LabelPropagationAlgorithm::do_nothing;
+  bool lp_unconstrained = false;
 };
 
-std::ostream& operator<<(std::ostream& out, const NLevelGlobalFMParameters& params);
+std::ostream& operator<<(std::ostream& out, const NLevelGlobalRefinementParameters& params);
 
 struct FlowParameters {
   FlowAlgorithm algorithm = FlowAlgorithm::do_nothing;
@@ -208,13 +227,23 @@ struct DeterministicRefinementParameters {
 
 std::ostream& operator<<(std::ostream& out, const DeterministicRefinementParameters& params);
 
+struct RebalancingParameters {
+  RebalancingAlgorithm algorithm = RebalancingAlgorithm::do_nothing;
+  double det_heavy_vertex_exclusion_factor = 1.5;
+  double det_relative_deadzone_size = 1.0;
+  size_t det_max_rounds = std::numeric_limits<size_t>::max();
+};
+
+std::ostream& operator<<(std::ostream& out, const RebalancingParameters& params);
+
 struct RefinementParameters {
   LabelPropagationParameters label_propagation;
+  JetParameters jet;
   FMParameters fm;
   DeterministicRefinementParameters deterministic_refinement;
-  NLevelGlobalFMParameters global_fm;
+  NLevelGlobalRefinementParameters global;
   FlowParameters flows;
-  RebalancingAlgorithm rebalancer = RebalancingAlgorithm::do_nothing;
+  RebalancingParameters rebalancing;
   bool refine_until_no_improvement = false;
   double relative_improvement_threshold = 0.0;
   size_t max_batch_size = std::numeric_limits<size_t>::max();
@@ -304,19 +333,6 @@ class Context {
   void setupGainPolicy();
 
   void sanityCheck(const TargetGraph* target_graph);
-
-  void load_default_preset();
-
-  void load_quality_preset();
-
-  void load_highest_quality_preset();
-
-  void load_deterministic_preset();
-
-  void load_large_k_preset();
-
- private:
-  void load_n_level_preset();
 };
 
 std::ostream & operator<< (std::ostream& str, const Context& context);

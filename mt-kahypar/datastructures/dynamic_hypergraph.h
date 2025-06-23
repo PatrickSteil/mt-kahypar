@@ -30,9 +30,9 @@
 #include <mutex>
 #include <queue>
 
-#include "tbb/parallel_for.h"
+#include <tbb/parallel_for.h>
 
-#include "include/libmtkahypartypes.h"
+#include "include/mtkahypartypes.h"
 
 #include "kahypar-resources/meta/mandatory.h"
 #include "kahypar-resources/datastructure/fast_reset_flag_array.h"
@@ -775,7 +775,8 @@ class DynamicHypergraph {
   // ####################### Contract / Uncontract #######################
 
   DynamicHypergraph contract(parallel::scalable_vector<HypernodeID>&, bool deterministic = false) {
-    throw NonSupportedOperationException(
+    unused(deterministic);
+    throw UnsupportedOperationException(
       "contract(c, id) is not supported in dynamic hypergraph");
     return DynamicHypergraph();
   }
@@ -951,7 +952,7 @@ class DynamicHypergraph {
   }
 
   void freeTmpContractionBuffer() {
-    throw NonSupportedOperationException(
+    throw UnsupportedOperationException(
       "freeTmpContractionBuffer() is not supported in dynamic hypergraph");
   }
 

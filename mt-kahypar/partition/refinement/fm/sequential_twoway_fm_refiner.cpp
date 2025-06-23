@@ -220,7 +220,7 @@ void SequentialTwoWayFmRefiner<TypeTraits>::deltaGainUpdate(const HyperedgeID he
     if (_phg.edgeSize(he) == 2) {
       for (const HypernodeID& pin : _phg.pins(he)) {
         if ( _vertex_state[pin] == VertexState::ACTIVE ) {
-          const char factor = (_phg.partID(pin) == from ? 2 : -2);
+          const int factor = (_phg.partID(pin) == from ? 2 : -2);
           updatePin(pin, factor * he_weight);
         }
       }
@@ -296,8 +296,9 @@ void SequentialTwoWayFmRefiner<TypeTraits>::rollback(const parallel::scalable_ve
     const HypernodeID hn = performed_moves[i];
     const PartitionID from = _phg.partID(hn);
     const PartitionID to = 1 - from;
-    _phg.changeNodePart(hn, from, to);
+    _phg.changeNodePartNoSync(hn, from, to);
   }
+  _phg.resetEdgeSynchronization();
 }
 
 template<typename TypeTraits>

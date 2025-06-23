@@ -28,7 +28,7 @@
 
 #pragma once
 
-#include "tbb/enumerable_thread_specific.h"
+#include <tbb/enumerable_thread_specific.h>
 
 #include "mt-kahypar/datastructures/static_graph.h"
 #include "mt-kahypar/parallel/atomic_wrapper.h"
@@ -64,7 +64,7 @@ class StaticGraphFactory {
                                                 const bool stable_construction_of_incident_edges = false);
 
   static std::pair<StaticGraph, parallel::scalable_vector<HypernodeID> > compactify(const StaticGraph&) {
-    throw NonSupportedOperationException(
+    throw UnsupportedOperationException(
       "Compactify not implemented for static graph.");
   }
 

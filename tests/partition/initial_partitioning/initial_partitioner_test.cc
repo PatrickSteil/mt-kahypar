@@ -121,7 +121,7 @@ class AInitialPartitionerTest : public Test {
 
   void assignCommunities() {
     std::vector<PartitionID> communities;
-    io::readPartitionFile(context.partition.graph_community_filename, communities);
+    io::readPartitionFile(context.partition.graph_community_filename, hypergraph.initialNumNodes(), communities);
 
     for ( const HypernodeID& hn : hypergraph.nodes() ) {
       hypergraph.setCommunityID(hn, communities[hn]);
@@ -148,8 +148,6 @@ class AInitialPartitionerTest : public Test {
 template <typename Config>
 size_t AInitialPartitionerTest<Config>::num_threads = HardwareTopology::instance().num_cpus();
 
-static constexpr double EPS = 0.05;
-
 typedef ::testing::Types<TestConfig<StaticHypergraphTypeTraits, Mode::deep_multilevel, 2>,
                          TestConfig<StaticHypergraphTypeTraits, Mode::deep_multilevel, 3>,
                          TestConfig<StaticHypergraphTypeTraits, Mode::deep_multilevel, 4>,
@@ -163,7 +161,7 @@ typedef ::testing::Types<TestConfig<StaticHypergraphTypeTraits, Mode::deep_multi
                          ENABLE_HIGHEST_QUALITY(COMMA TestConfig<DynamicHypergraphTypeTraits COMMA Mode::recursive_bipartitioning COMMA 3>)
                          ENABLE_HIGHEST_QUALITY(COMMA TestConfig<DynamicHypergraphTypeTraits COMMA Mode::recursive_bipartitioning COMMA 4>) > TestConfigs;
 
-TYPED_TEST_CASE(AInitialPartitionerTest, TestConfigs);
+TYPED_TEST_SUITE(AInitialPartitionerTest, TestConfigs);
 
 TYPED_TEST(AInitialPartitionerTest, VerifiesComputedPartition) {
   this->runInitialPartitioning();

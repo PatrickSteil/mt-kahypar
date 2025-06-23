@@ -37,6 +37,7 @@
 #include "mt-kahypar/datastructures/sparse_map.h"
 #include "mt-kahypar/datastructures/delta_connectivity_set.h"
 #include "mt-kahypar/datastructures/connectivity_set.h"
+#include "mt-kahypar/datastructures/synchronized_edge_update.h"
 #include "mt-kahypar/parallel/stl/scalable_vector.h"
 #include "mt-kahypar/partition/context.h"
 #include "mt-kahypar/utils/exception.h"
@@ -74,7 +75,6 @@ class DeltaPartitionedGraph {
     _part_weights_delta(context.partition.k, 0),
     _part_ids_delta(),
     _dummy_connectivity_set() {
-      const bool top_level = context.type == ContextType::main;
       _part_ids_delta.initialize(MAP_SIZE_SMALL);
     }
 
@@ -266,19 +266,19 @@ class DeltaPartitionedGraph {
 
   // ! Returns an iterator over the connectivity set of hyperedge he (not supported)
   IteratorRange<ConnectivitySetIterator> connectivitySet(const HyperedgeID e) const {
-    throw NonSupportedOperationException("Not supported for graphs");
+    throw UnsupportedOperationException("Not supported for graphs");
     return _dummy_connectivity_set.connectivitySet(e);
   }
 
   // ! Returns the number of blocks contained in hyperedge he (not supported)
   PartitionID connectivity(const HyperedgeID e) const {
-    throw NonSupportedOperationException("Not supported for graphs");
+    throw UnsupportedOperationException("Not supported for graphs");
     return _dummy_connectivity_set.connectivity(e);
   }
 
   // ! Creates a deep copy of the connectivity set of hyperedge he (not supported)
   Bitset& deepCopyOfConnectivitySet(const HyperedgeID he) const {
-    throw NonSupportedOperationException("Not supported for graphs");
+    throw UnsupportedOperationException("Not supported for graphs");
     return _dummy_connectivity_set.deepCopy(he);
   }
 
