@@ -56,18 +56,21 @@ struct OriginalHypergraphInfo {
     ASSERT(current_k > 0 && (current_k & (current_k - 1)) == 0);
 
     if (current_k == original_k) {
-      return 2.0;
+      return 10.0;
     }
 
-    const int level = static_cast<int>(std::log2(original_k / current_k));
+    return original_epsilon;
 
-    if (level == 1) {
-      return 1.0;
-    } else if (level == 2) {
-      return 0.9;
-    } else {
-      return original_epsilon;
-    }
+    /*     const int level = static_cast<int>(std::log2(original_k /
+     * current_k)); */
+
+    /*     if (level == 1) { */
+    /*       return 1.0; */
+    /*     } else if (level == 2) { */
+    /*       return 0.9; */
+    /*     } else { */
+    /*       return original_epsilon; */
+    /*     } */
   }
 
   // The initial allowed imbalance cannot be used for each bipartition as this
