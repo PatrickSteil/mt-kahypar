@@ -11,10 +11,13 @@ namespace filtering {
 
 // Lock-free union-find over a fixed universe of ids [0, n). Thread-safe for
 // concurrent find()/unite() calls; the universe size is fixed at construction.
-// Union by size with path halving. `setSize` is a performance heuristic only
-// (it may be transiently stale immediately after a concurrent unite() call
-// elsewhere) -- it never affects correctness of set membership, only the
-// balancing of future unions.
+// Union by id (not by size -- see below) with path halving. `setSize` is a
+// best-effort heuristic ONLY: under concurrent structural changes its
+// undercount can be permanent, not merely transient (a root can be demoted
+// by an unrelated concurrent unite() between being read and having a
+// sibling's size folded into it). It must never be used for
+// correctness-critical decisions -- only for coarse balancing/reporting.
+// Nothing in this module relies on setSize() for correctness.
 class AtomicUnionFind {
  public:
   explicit AtomicUnionFind(size_t n) : _parent(n), _size(n) {
@@ -41,9 +44,20 @@ class AtomicUnionFind {
       uint32_t ra = find(a);
       uint32_t rb = find(b);
       if (ra == rb) return false;
-      if (_size[ra].load(std::memory_order_relaxed) < _size[rb].load(std::memory_order_relaxed)) {
-        std::swap(ra, rb);
-      }
+      // Deterministic orientation: always attach the larger-id root under
+      // the smaller-id root. This MUST NOT depend on the caller's argument
+      // order, nor on a racy read of `_size` -- two concurrent unite() calls
+      // that resolve to the same two pre-existing roots (e.g. unite(x,y) and
+      // unite(y,x) racing on already-formed components, or two calls whose
+      // relative size reads flip due to a third thread's concurrent update)
+      // must always agree on which side attaches to which. Root ids don't
+      // change while a node is still a root, so comparing them is race-free
+      // in a way comparing `_size` is not. Getting this wrong lets both
+      // CASes below succeed in opposite directions, forming a 2-cycle that a
+      // racing find() can then use to fully un-merge two already-united
+      // elements -- this is exactly the bug this comment exists to prevent
+      // a future edit from reintroducing.
+      if (ra > rb) std::swap(ra, rb);
       uint32_t expected = rb;
       if (_parent[rb].compare_exchange_strong(expected, ra, std::memory_order_relaxed)) {
         _size[ra].fetch_add(_size[rb].load(std::memory_order_relaxed), std::memory_order_relaxed);
