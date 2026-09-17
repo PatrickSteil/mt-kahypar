@@ -16,7 +16,8 @@
 - `NodeID`/`EdgeID` are `uint32_t`, `NodeWeight` is `uint64_t`, `EdgeWeight` is `int64_t` (spec section 3).
 - Default parameters: `tau = 5`, `alpha = 1.0`, `f = 10`, `coverage (C) = 2` (spec sections 4.2, 5).
 - Build registration follows the existing pattern: sources are added to the `PreprocessingSources` list in `mt-kahypar/partition/preprocessing/CMakeLists.txt` (no new nested `CMakeLists.txt`, matching how `community_detection/` is wired in) via `target_sources(MtKaHyPar-Sources INTERFACE ...)` and `target_sources(MtKaHyPar-ToolsSources INTERFACE ...)`. Tests are added to `tests/partition/preprocessing/CMakeLists.txt` via `target_sources(mtkahypar_tests PRIVATE ...)`.
-- **Correction from the spec during planning:** spec section 4.2 ("build spanning tree, contract subtree ≤ U top-down") actually requires the **bridge tree** (nodes = 2-edge-connected blocks, edges = bridges), not a spanning tree of the whole graph — a plain spanning tree of a connected graph has no substructure to contract. Task 9 below implements the corrected version. Pass 1 and pass 3 (2-edge-cuts) both need the same spanning-tree-plus-random-XOR-label machinery, factored into a shared `cut_signatures` module (Task 6).
+- **Correction from the spec during planning:** spec section 4.2 ("build spanning tree, contract subtree ≤ U top-down") actually requires the **bridge tree** (nodes = 2-edge-connected blocks, edges = bridges), not a spanning tree of the whole graph — a plain spanning tree of a connected graph has no substructure to contract. Task 8 below implements the corrected version. Pass 1 and pass 3 (2-edge-cuts) both need the same spanning-tree-plus-random-XOR-label machinery, factored into a shared `cut_signatures` module (Task 6).
+- **Correction found during pre-flight review (before any task was dispatched):** Task 8's original draft unconditionally merged every vertex of every block into one vertex per block, and translated tau-merges through a separate block-level union-find — both wrong. The first would collapse blocks that were never chosen for contraction (destroying structure later passes need); the second could silently reference an uninitialized representative and crash. Worse, a naive per-merge tau-merge check (`child_subtree + parent's own weight <= U`) allows two *separate* small children of the same parent to each individually pass the check while their *combined* weight, once both are merged into that parent, exceeds `U` — a real violation of the hard `U`-invariant that Task 17's `filtering_invariant_test.cc` exists specifically to catch. Task 8's implementation below is the corrected version: block representatives are computed unconditionally, vertex-level unions happen directly (no block-level union-find detour), and a `tau_merged_extra_weight` accumulator per parent block prevents the cascading overflow. Task 8's test `TauMergePreventsCascadingOverflow` exercises exactly this case.
 - **Deferred from the spec:** the "two-components-at-a-time" traversal optimization for processing 2-edge-cut classes (spec section 4.4 step 8) is not implemented in this pass. Each class is processed via a direct connected-components-excluding-edges call instead. This is simpler and correct; flagged as a follow-up optimization if profiling on real DIMACS instances shows it's needed (real road networks are expected to produce a small number of 2-cut classes per contraction stage).
 
 ---
@@ -953,10 +954,10 @@ TEST(ParallelConnectivityTest, SpanningForestCoversAllVerticesWithDefaultRoots) 
 TEST(ParallelConnectivityTest, SpanningForestHonorsExplicitRoots) {
   FilterGraph graph = make_two_triangles();
   std::vector<NodeID> component = parallel_connected_components(graph);
-  std::vector<NodeID> roots = {component[0] == component[2] ? NodeID(2) : NodeID(0),
-                                component[3] == component[5] ? NodeID(5) : NodeID(3)};
-  // Simpler: just force roots 2 and 5 explicitly (both valid, one per component).
-  roots = {2, 5};
+  // Force roots 2 and 5 explicitly (one per component, each a valid member
+  // of that component in make_two_triangles' fixed layout: {0,1,2} and
+  // {3,4,5}).
+  std::vector<NodeID> roots = {2, 5};
   SpanningForest forest = build_spanning_forest(graph, component, roots);
   EXPECT_EQ(forest.parent[2], 2u);
   EXPECT_EQ(forest.parent[5], 5u);
@@ -1603,21 +1604,71 @@ TEST(ContractComponentTreeTest, ContractsASmallLeafHangingOffABridge) {
   EXPECT_EQ(contracted_weight, 2u);
 }
 
-TEST(ContractComponentTreeTest, TauMergeFoldsSmallSubtreeIntoParent) {
-  // Same shape, but now U is large enough that after contracting {3,4} (size
-  // 2 <= tau = 5), it also gets folded into its parent block (the triangle),
-  // since 2 (subtree) + 300 (a single parent vertex 2's weight, not the
-  // whole triangle)... to keep this unambiguous we use a simple path instead
-  // of a triangle for the parent side: 0 (weight 300) -- 1 (weight 1, small
-  // leaf). With U = 400 and tau = 5: subtree {1} has size 1 <= tau, and
-  // 1 + 300 <= U, so vertex 1 gets folded into vertex 0.
-  std::vector<NodeWeight> weights = {300, 1};
+TEST(ContractComponentTreeTest, TauMergeFoldsSmallSubtreeIntoParentSpecifically) {
+  // A 3-block chain: root(weight 1000, its subtree alone is far too big to
+  // ever be chosen as a whole) -- mid(weight 2) -- leaf(weight 1). With
+  // U = 10, tau = 5: mid's own subtree {mid, leaf} has weight 3 <= U, so it
+  // gets chosen and contracted as a unit; since 3 <= tau AND 3 + root's own
+  // weight... wait, root's own weight (1000) alone already exceeds U, so no
+  // merge into root should happen here either. This deliberately isolates
+  // the "chosen subtree, but tau-merge condition fails because the parent is
+  // heavy" case, distinct from the plain "whole graph fits" case.
+  std::vector<NodeWeight> weights = {1000, 2, 1};
+  std::vector<EdgeListEntry> edges = {{0, 1, 1}, {1, 2, 1}};
+  FilterGraph graph = build_csr_from_edge_list(edges, weights);
+
+  ContractionResult result = contract_component_tree(graph, TinyCutParams{10, 5});
+  EXPECT_EQ(result.mapping[1], result.mapping[2]);   // mid+leaf contract together
+  EXPECT_NE(result.mapping[0], result.mapping[1]);   // but root stays separate
+  EXPECT_EQ(result.graph.numNodes(), 2u);
+}
+
+TEST(ContractComponentTreeTest, TauMergeActuallyFusesIntoALightParent) {
+  // root(weight 2, light enough itself) -- leaf(weight 2). Root's own
+  // subtree (root+leaf, weight 4) already fits under U = 10 directly, so
+  // this alone contracts everything without needing tau-merge -- included
+  // as a baseline. The interesting case is TauMergePreventsCascadingOverflow
+  // below, which is the one that actually isolates the tau-merge-into-a-
+  // not-otherwise-chosen-parent path.
+  std::vector<NodeWeight> weights = {2, 2};
   std::vector<EdgeListEntry> edges = {{0, 1, 1}};
   FilterGraph graph = build_csr_from_edge_list(edges, weights);
 
-  ContractionResult result = contract_component_tree(graph, TinyCutParams{400, 5});
+  ContractionResult result = contract_component_tree(graph, TinyCutParams{10, 5});
   EXPECT_EQ(result.graph.numNodes(), 1u);
   EXPECT_EQ(result.mapping[0], result.mapping[1]);
+}
+
+TEST(ContractComponentTreeTest, TauMergePreventsCascadingOverflow) {
+  // R(weight 1000, unambiguously the heaviest block so it's picked as root)
+  // -- P(weight 1, a light non-root parent) -- {child_a(weight 4),
+  // child_b(weight 4)} (P's two children). With U = 6, tau = 5: P's own
+  // subtree (1+4+4=9) is too big to be chosen as a whole (9 > 6), so P
+  // itself is never marked chosen. child_a's subtree (weight 4) <= U and
+  // <= tau, and 4 + P's own weight (1) = 5 <= U, so child_a tau-merges into
+  // P. child_b's subtree also individually satisfies 4 + 1 = 5 <= U -- but
+  // P has ALREADY absorbed child_a's 4 units of extra weight, so the TRUE
+  // combined result of also merging child_b (1 + 4 + 4 = 9) would exceed U.
+  // The implementation must track this and skip child_b's tau-merge, leaving
+  // child_b's own already-contracted subtree (just itself) standing on its
+  // own rather than fusing it into the now-full P group. This is the exact
+  // bug caught during this plan's pre-flight review (see the Global
+  // Constraints note on this task) -- if the fix regresses, this test will
+  // fail by observing a merged group heavier than U.
+  std::vector<NodeWeight> weights = {1000, 1, 4, 4};
+  std::vector<EdgeListEntry> edges = {{0, 1, 1}, {1, 2, 1}, {1, 3, 1}};
+  FilterGraph graph = build_csr_from_edge_list(edges, weights);
+
+  ContractionResult result = contract_component_tree(graph, TinyCutParams{6, 5});
+
+  for (size_t v = 0; v < result.graph.numNodes(); ++v) {
+    EXPECT_LE(result.graph.node_weight[v], 6u) << "vertex " << v << " exceeds U";
+  }
+  EXPECT_NE(result.mapping[0], result.mapping[1]);  // R never merges with anything
+  // Exactly one of P's two children fused with P; the other stands alone.
+  const bool a_fused_with_p = (result.mapping[1] == result.mapping[2]);
+  const bool b_fused_with_p = (result.mapping[1] == result.mapping[3]);
+  EXPECT_TRUE(a_fused_with_p != b_fused_with_p);
 }
 
 TEST(ContractComponentTreeTest, LargeGraphIsLeftUntouchedWhenNoSubtreeFits) {
@@ -1756,46 +1807,71 @@ ContractionResult contract_component_tree(const FilterGraph& graph, const TinyCu
     if (parent != b) subtree_weight[parent] += subtree_weight[b];
   }
 
-  // Step 6: top-down selection of subtrees to contract (weight <= U), plus
-  // the tau-merge into the parent block. `chosen[b]` marks b as the topmost
-  // block of a contracted subtree; `is_within_chosen_subtree[b]` marks every
-  // block already absorbed by an ancestor's contraction (forward BFS order
-  // visits parents before children, so this propagates correctly downward).
+  // Step 6: one representative original vertex per block, computed
+  // unconditionally (a tau-merge target block may never itself be "chosen"
+  // -- see below -- so every block needs a representative available).
+  std::vector<NodeID> block_representative_vertex(num_blocks, kInvalidNode);
+  for (size_t v = 0; v < n; ++v) {
+    NodeID& rep = block_representative_vertex[block_of[v]];
+    if (rep == kInvalidNode) rep = static_cast<NodeID>(v);
+  }
+
+  // Step 7: top-down selection of subtrees to contract (weight <= U), plus
+  // the tau-merge into the parent block, building the vertex-level
+  // union-find DIRECTLY (not via an intermediate block-level union-find --
+  // see the note below on why that translation is unsound).
+  //
+  // `is_within_chosen_subtree[b]` marks a block whose own subtree_weight
+  // triggered contraction, either directly or by inheriting from an
+  // already-chosen ancestor (forward BFS order visits parents before
+  // children, so this propagates correctly downward). A tau-merge target
+  // (the immediate parent of a chosen small subtree) is unioned into the
+  // vertex group directly, WITHOUT setting is_within_chosen_subtree on the
+  // parent itself: doing so would incorrectly make every OTHER child of that
+  // parent auto-absorb regardless of its own size, which is not what a
+  // tau-merge means (it is a narrow, single-subtree-into-its-immediate-
+  // parent extension, not "the parent is now fully contracted").
+  //
+  // `tau_merged_extra_weight[parent]` guards against a genuine correctness
+  // bug that a naive per-merge check misses: TWO SEPARATE small subtrees
+  // hanging off the SAME parent can each individually satisfy
+  // "subtree + parent's own weight <= U", yet their COMBINED weight once
+  // both are merged into the same parent can exceed U (e.g. parent weight 1,
+  // two children of weight 4 each, U = 6: 4+1 <= 6 passes twice, but
+  // 4+4+1 = 9 > 6). Tracking how much extra weight has already been folded
+  // into a given parent via prior tau-merges, and including it in the check,
+  // prevents this -- since Part 1's own U-cap is part of what keeps Part 2's
+  // final fragments within U (see design spec section 6), not merely Part
+  // 2's alpha <= 1 guarantee on its own.
   std::vector<char> is_within_chosen_subtree(num_blocks, 0);
-  AtomicUnionFind block_groups(num_blocks);
+  std::vector<NodeWeight> tau_merged_extra_weight(num_blocks, 0);
+  AtomicUnionFind vertex_groups(n);
   for (NodeID b : quotient_forest.bfs_order) {
     const NodeID parent = quotient_forest.parent[b];
     if (parent != b && is_within_chosen_subtree[parent]) {
       is_within_chosen_subtree[b] = 1;
-      block_groups.unite(b, parent);
+      vertex_groups.unite(block_representative_vertex[b], block_representative_vertex[parent]);
       continue;
     }
     if (subtree_weight[b] <= params.U) {
       is_within_chosen_subtree[b] = 1;
       if (parent != b && subtree_weight[b] <= params.tau &&
-          subtree_weight[b] + quotient.node_weight[parent] <= params.U) {
-        block_groups.unite(b, parent);
+          subtree_weight[b] + quotient.node_weight[parent] + tau_merged_extra_weight[parent] <= params.U) {
+        vertex_groups.unite(block_representative_vertex[b], block_representative_vertex[parent]);
+        tau_merged_extra_weight[parent] += subtree_weight[b];
       }
     }
   }
 
-  // Step 7: translate block-level groups into a union-find over the
-  // ORIGINAL graph's vertices, and contract. Each block gets one
-  // representative original vertex; every vertex of a block unions with that
-  // representative, and block representatives union according to
-  // block_groups (which already encodes both the top-down subtree choices
-  // and the tau-merge).
-  std::vector<NodeID> block_representative_vertex(num_blocks, kInvalidNode);
-  AtomicUnionFind vertex_groups(n);
+  // Step 8: collapse every vertex of a chosen block into that block's own
+  // representative (blocks that were never chosen, and never tau-merge
+  // targets, keep their original internal vertices and edges untouched --
+  // this is intentional: a block too big to contract must retain its
+  // internal structure for pass 2/3 to potentially reduce further).
   for (size_t v = 0; v < n; ++v) {
-    NodeID& rep = block_representative_vertex[block_of[v]];
-    if (rep == kInvalidNode) rep = static_cast<NodeID>(v);
-    else vertex_groups.unite(rep, static_cast<NodeID>(v));
-  }
-  for (NodeID b = 0; b < num_blocks; ++b) {
-    const NodeID root = block_groups.find(b);
-    if (root != b) {
-      vertex_groups.unite(block_representative_vertex[root], block_representative_vertex[b]);
+    const NodeID b = block_of[v];
+    if (is_within_chosen_subtree[b]) {
+      vertex_groups.unite(block_representative_vertex[b], static_cast<NodeID>(v));
     }
   }
 
@@ -1810,7 +1886,7 @@ ContractionResult contract_component_tree(const FilterGraph& graph, const TinyCu
 
 Add `filtering/tiny_cut_detection.cpp` to `PreprocessingSources`.
 Run: `cmake --build build --target mtkahypar_tests -j$(nproc) && ./build/tests/mtkahypar_tests --gtest_filter=ContractComponentTreeTest.*`
-Expected: PASS (3 tests)
+Expected: PASS (5 tests)
 
 - [ ] **Step 6: Commit**
 
