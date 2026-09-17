@@ -3,7 +3,8 @@ set(PreprocessingSources
         community_detection/local_moving_modularity.cpp
         filtering/filter_graph.cpp
         filtering/dimacs_io.cpp
-        filtering/graph_contraction.cpp)
+        filtering/graph_contraction.cpp
+        filtering/parallel_connectivity.cpp)
 
 target_sources(MtKaHyPar-Sources INTERFACE ${PreprocessingSources})
 target_sources(MtKaHyPar-ToolsSources INTERFACE ${PreprocessingSources})
