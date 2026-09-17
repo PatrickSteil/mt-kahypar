@@ -1,6 +1,7 @@
 // mt-kahypar/partition/preprocessing/filtering/parallel_connectivity.cpp
 #include "mt-kahypar/partition/preprocessing/filtering/parallel_connectivity.h"
 
+#include <cassert>
 #include <deque>
 #include <unordered_map>
 
@@ -57,6 +58,19 @@ SpanningForest build_spanning_forest(const FilterGraph& graph,
     for (size_t v = 0; v < n; ++v) {
       if (seen.emplace(component[v], true).second) roots.push_back(static_cast<NodeID>(v));
     }
+  } else {
+    // Debug-only precondition check: no two supplied roots may belong to
+    // the same real component -- that reproduces the same class of race as
+    // passing an excluding-variant component here (see the header comment).
+    assert([&] {
+      std::vector<char> seen_component(n, 0);
+      for (NodeID root : roots_in) {
+        if (root >= n) return false;
+        if (seen_component[component[root]]) return false;
+        seen_component[component[root]] = 1;
+      }
+      return true;
+    }() && "roots must contain at most one entry per distinct component value, each a valid vertex id");
   }
 
   SpanningForest forest;
@@ -65,9 +79,12 @@ SpanningForest build_spanning_forest(const FilterGraph& graph,
   forest.roots = roots;
   std::vector<std::vector<NodeID>> order_per_root(roots.size());
 
-  // Each root's BFS only ever touches vertices in its own component, so
-  // concurrent writes to forest.parent/forest.parent_edge from different
-  // roots never touch the same index -- no data race despite plain vectors.
+  // Each root's true BFS-reachable set in `graph` is exactly its own
+  // component (guaranteed only when `component` came from
+  // parallel_connected_components on this same graph -- see the header
+  // comment), so concurrently-running BFS instances never touch the same
+  // vertex, hence never the same index of forest.parent/forest.parent_edge
+  // -- no data race despite plain (non-atomic) vectors.
   tbb::parallel_for(size_t(0), roots.size(), [&](size_t i) {
     const NodeID root = roots[i];
     std::vector<NodeID>& order = order_per_root[i];

@@ -67,4 +67,17 @@ TEST(ParallelConnectivityTest, SpanningForestHonorsExplicitRoots) {
   SpanningForest forest = build_spanning_forest(graph, component, roots);
   EXPECT_EQ(forest.parent[2], 2u);
   EXPECT_EQ(forest.parent[5], 5u);
+  // The explicit-roots path must be as fully covered as the default-roots
+  // path: every vertex reached, every non-root's tree edge in its own
+  // component, and each vertex's parent chain leading back to the root
+  // that owns its component (not the other root).
+  ASSERT_EQ(forest.bfs_order.size(), 6u);
+  for (NodeID v = 0; v < 6; ++v) {
+    EXPECT_NE(forest.parent[v], kInvalidNode);
+    const NodeID owning_root = (component[v] == component[2]) ? NodeID(2) : NodeID(5);
+    NodeID cur = v;
+    while (forest.parent[cur] != cur) cur = forest.parent[cur];
+    EXPECT_EQ(cur, owning_root);
+    if (v != 2 && v != 5) EXPECT_NE(forest.parent_edge[v], kInvalidEdge);
+  }
 }
