@@ -31,11 +31,24 @@ std::vector<char> compute_bridges(const FilterGraph& graph, const EdgeSignatures
 // 4.4): buckets every non-bridge edge by its signature (tree edges by their
 // aggregated label, non-tree edges by their own label -- see
 // compute_edge_signatures), then verifies each candidate class of size >= 2
-// by checking that its first two edges' removal actually disconnects the
-// graph locally. Verified classes are returned; unverified (collision)
-// candidates are dropped (Monte Carlo false positives are astronomically
-// rare at 128 bits, but the check is cheap enough to always do -- see design
-// spec section 4.4 step 7).
+// by removing every edge in the class at once and checking that two of its
+// endpoints land in different connected components. This is a sufficient
+// check (not merely a one-pair spot-check): signature equality already
+// implies identical fundamental-cycle coverage sets for every edge in the
+// bucket (up to an astronomically rare 128-bit collision), which by the
+// cographic-matroid argument in the design spec means EVERY pair within a
+// genuine bucket forms a valid 2-cut -- so confirming any single
+// representative pair is disconnected is enough to confirm the whole
+// bucket. Verified classes are returned; unverified (collision) candidates
+// are dropped. Note this deliberately does NOT special-case "the class
+// happens to form a simple cycle" or similar shape-based heuristics: a
+// bucket like a whole triangle's 3 edges (which all share one signature,
+// since the triangle's one chord's fundamental cycle covers both of its
+// tree edges) is a genuine, correct class -- every pair of a triangle's
+// edges is a valid 2-cut, since a triangle's own minimum edge cut is 2, not
+// 3 (see BridgeIsExcludedButEachTriangleIsItsOwnClass in the test file,
+// which replaced an earlier, incorrect "no classes at all" expectation for
+// exactly this shape).
 std::vector<std::vector<EdgeID>> find_two_edge_cut_classes(const FilterGraph& graph,
                                                             const EdgeSignatures& sigs);
 

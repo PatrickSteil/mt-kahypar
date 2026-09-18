@@ -108,10 +108,21 @@ TEST(CutSignaturesTest, ThetaGraphHasTwoIndependentCutPairs) {
   for (auto& c : classes) EXPECT_EQ(c.size(), 2u);
 }
 
-TEST(CutSignaturesTest, BridgesAreExcludedFromCutClasses) {
-  // Two triangles joined by a bridge: the bridge must not appear in any
-  // 2-cut class (it's a 1-cut on its own), and the two triangles' edges are
-  // 3-edge-connected internally, so no 2-cut classes exist at all.
+TEST(CutSignaturesTest, BridgeIsExcludedButEachTriangleIsItsOwnClass) {
+  // Two triangles joined by a bridge. An earlier draft of this test wrongly
+  // expected NO 2-cut classes at all, reasoning that a triangle is
+  // "3-edge-connected internally" -- it is not. A triangle's min edge cut
+  // is 2 (any two of its three edges isolate the third vertex, e.g.
+  // removing (0,1) and (1,2) here isolates vertex 1 while the rest of the
+  // graph -- 0, plus the bridge, plus triangle B -- stays connected via
+  // edge (0,2)). By PUNCH's own equivalence relation P ("e,f form a 2-cut,
+  // but neither is a 1-cut on its own"), every pair of edges within a
+  // single triangle qualifies, since individually none of a triangle's
+  // edges is a bridge. So each triangle's 3 edges form their own
+  // equivalence class of size 3 -- this matches the general "an n-cycle's
+  // edges form one class of size n" pattern already exercised by
+  // CycleGraphIsOneClassOfAllEdges above (a triangle is a 3-cycle). Only
+  // the bridge (2,3) itself must never appear in any class.
   std::vector<NodeWeight> weights(6, 1);
   std::vector<EdgeListEntry> edges = {
     {0, 1, 1}, {1, 2, 1}, {0, 2, 1},
@@ -121,6 +132,12 @@ TEST(CutSignaturesTest, BridgesAreExcludedFromCutClasses) {
   FilterGraph graph = build_csr_from_edge_list(edges, weights);
   EdgeSignatures sigs = signatures_for(graph);
 
-  std::vector<std::vector<EdgeID>> classes = find_two_edge_cut_classes(graph, sigs);
-  EXPECT_TRUE(classes.empty());
+  std::vector<std::vector<EdgeID>> classes = normalize(find_two_edge_cut_classes(graph, sigs));
+  ASSERT_EQ(classes.size(), 2u);
+  EXPECT_EQ(classes[0].size(), 3u);
+  EXPECT_EQ(classes[1].size(), 3u);
+  const EdgeID bridge_id = 3;  // canonical id of {2,3}, the 4th edge added (index 3)
+  for (const auto& cls : classes) {
+    EXPECT_EQ(std::find(cls.begin(), cls.end(), bridge_id), cls.end());
+  }
 }

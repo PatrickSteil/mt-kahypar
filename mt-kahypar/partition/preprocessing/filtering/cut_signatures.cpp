@@ -1,8 +1,6 @@
 #include "mt-kahypar/partition/preprocessing/filtering/cut_signatures.h"
 
-#include <map>
 #include <random>
-#include <set>
 #include <unordered_map>
 
 #include "mt-kahypar/partition/preprocessing/filtering/parallel_connectivity.h"
@@ -82,12 +80,12 @@ struct SignatureHash {
   }
 };
 
-// A class is verified if:
-// 1. Removing all its edges actually disconnects at least one pair of incident
-//    vertices from each other.
-// 2. The class does NOT form a simple cycle within a larger component (such a
-//    cycle is not a genuine 2-cut, but a degenerate case of being "trapped" in
-//    a local cycle).
+// A class is verified if removing all its edges actually disconnects at
+// least one pair of its incident vertices from each other. This is a
+// sufficient check because signature equality already implies identical
+// fundamental-cycle coverage sets for every edge in the bucket (up to an
+// astronomically rare 128-bit collision), which means every pair within
+// a genuine bucket forms a valid 2-cut.
 bool verify_class_disconnects(const FilterGraph& graph, const std::vector<EdgeID>& cls) {
   std::vector<char> excluded(graph.numEdges(), 0);
   for (EdgeID e : cls) excluded[e] = 1;
@@ -95,51 +93,7 @@ bool verify_class_disconnects(const FilterGraph& graph, const std::vector<EdgeID
   auto endpoints = compute_edge_endpoints(graph);
   const NodeID u = endpoints[cls[0]].first;
   const NodeID v = endpoints[cls[0]].second;
-
-  // Check basic disconnection
-  if (component[u] == component[v]) return false;
-
-  // Check that the class doesn't form a simple cycle (every vertex in the class
-  // has degree exactly 2 within the class). A simple cycle that is a proper
-  // subset of a larger component is degenerate and should be rejected.
-  std::set<NodeID> class_vertices;
-  std::map<NodeID, int> degree_in_class;
-  for (EdgeID e : cls) {
-    auto [s, t] = endpoints[e];
-    class_vertices.insert(s);
-    class_vertices.insert(t);
-    degree_in_class[s]++;
-    degree_in_class[t]++;
-  }
-
-  bool is_simple_cycle = true;
-  for (NodeID v : class_vertices) {
-    if (degree_in_class[v] != 2) {
-      is_simple_cycle = false;
-      break;
-    }
-  }
-
-  // If it's a simple cycle, check if it's a proper subset of a larger component
-  // by checking if there are edges from cycle vertices to non-cycle vertices.
-  if (is_simple_cycle) {
-    for (NodeID v : class_vertices) {
-      for (EdgeID pos = graph.node_begin[v]; pos < graph.node_begin[v + 1]; ++pos) {
-        const EdgeID e = graph.adj_edge[pos];
-        const NodeID other = graph.adj[pos];
-        // Skip edges that are in the class (already excluded)
-        if (excluded[e]) continue;
-        // If this edge connects to a vertex outside the cycle, reject the class
-        if (class_vertices.find(other) == class_vertices.end()) {
-          return false;  // Cycle is a proper subset of a larger component
-        }
-      }
-    }
-    // If we reach here, the cycle is not connected to anything outside, so it's
-    // the entire component and is valid
-  }
-
-  return true;
+  return component[u] != component[v];
 }
 }  // namespace
 
