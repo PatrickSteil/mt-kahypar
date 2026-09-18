@@ -119,3 +119,40 @@ TEST(ContractComponentTreeTest, LargeGraphIsLeftUntouchedWhenNoSubtreeFits) {
   EXPECT_EQ(result.graph.numNodes(), 3u);
   EXPECT_EQ(result.graph.numEdges(), 3u);
 }
+
+TEST(ContractDegree2ChainsTest, ContractsAPathBetweenTwoAnchors) {
+  // A(deg1) - B(deg2) - C(deg2) - D(deg1). B and C should merge.
+  std::vector<NodeWeight> weights = {1, 1, 1, 1};
+  std::vector<EdgeListEntry> edges = {{0, 1, 1}, {1, 2, 1}, {2, 3, 1}};
+  FilterGraph graph = build_csr_from_edge_list(edges, weights);
+
+  ContractionResult result = contract_degree2_chains(graph, 10);
+  EXPECT_EQ(result.graph.numNodes(), 3u);
+  EXPECT_EQ(result.mapping[1], result.mapping[2]);
+  EXPECT_NE(result.mapping[0], result.mapping[1]);
+  EXPECT_NE(result.mapping[2], result.mapping[3]);
+}
+
+TEST(ContractDegree2ChainsTest, LeavesChainUntouchedWhenTooBig) {
+  std::vector<NodeWeight> weights = {1, 100, 100, 1};
+  std::vector<EdgeListEntry> edges = {{0, 1, 1}, {1, 2, 1}, {2, 3, 1}};
+  FilterGraph graph = build_csr_from_edge_list(edges, weights);
+
+  ContractionResult result = contract_degree2_chains(graph, 10);
+  EXPECT_EQ(result.graph.numNodes(), 4u);
+  EXPECT_NE(result.mapping[1], result.mapping[2]);
+}
+
+TEST(ContractDegree2ChainsTest, ContractsAPureCycleWithNoAnchor) {
+  // A 5-cycle: every vertex has degree 2, so there's no anchor. The whole
+  // component is one chain.
+  std::vector<NodeWeight> weights(5, 1);
+  std::vector<EdgeListEntry> edges = {
+    {0, 1, 1}, {1, 2, 1}, {2, 3, 1}, {3, 4, 1}, {4, 0, 1}
+  };
+  FilterGraph graph = build_csr_from_edge_list(edges, weights);
+
+  ContractionResult result = contract_degree2_chains(graph, 10);
+  EXPECT_EQ(result.graph.numNodes(), 1u);
+  EXPECT_EQ(result.graph.numEdges(), 0u);
+}

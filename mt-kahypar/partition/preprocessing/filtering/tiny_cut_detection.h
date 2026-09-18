@@ -22,5 +22,12 @@ struct TinyCutParams {
 // parent block if the merged weight is still <= U.
 ContractionResult contract_component_tree(const FilterGraph& graph, const TinyCutParams& params);
 
+// Part 1, pass 2 (design spec section 4.3): contracts each maximal chain of
+// degree-2 vertices into a single vertex, provided the chain's total weight
+// is <= U (whole-chain-or-nothing; a chain that's too big is left as-is). A
+// connected component made entirely of degree-2 vertices (a pure cycle, with
+// no anchor of different degree) is treated as one chain.
+ContractionResult contract_degree2_chains(const FilterGraph& graph, NodeWeight U);
+
 }  // namespace filtering
 }  // namespace mt_kahypar

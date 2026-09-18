@@ -151,5 +151,59 @@ ContractionResult contract_component_tree(const FilterGraph& graph, const TinyCu
   return contract_graph(graph, vertex_groups);
 }
 
+namespace {
+std::vector<NodeID> walk_chain_from(const FilterGraph& graph, const std::vector<char>& is_deg2,
+                                     std::vector<char>& visited, NodeID prev, NodeID cur) {
+  std::vector<NodeID> chain;
+  while (is_deg2[cur] && !visited[cur]) {
+    visited[cur] = 1;
+    chain.push_back(cur);
+    NodeID next = kInvalidNode;
+    for (EdgeID pos = graph.node_begin[cur]; pos < graph.node_begin[cur + 1]; ++pos) {
+      if (graph.adj[pos] != prev) { next = graph.adj[pos]; break; }
+    }
+    prev = cur;
+    cur = next;
+  }
+  return chain;
+}
+}  // namespace
+
+ContractionResult contract_degree2_chains(const FilterGraph& graph, NodeWeight U) {
+  const size_t n = graph.numNodes();
+  std::vector<char> is_deg2(n);
+  for (size_t v = 0; v < n; ++v) is_deg2[v] = (graph.degree(static_cast<NodeID>(v)) == 2);
+
+  std::vector<char> visited(n, 0);
+  AtomicUnionFind uf(n);
+
+  auto try_contract_chain = [&](const std::vector<NodeID>& chain) {
+    if (chain.empty()) return;
+    NodeWeight total = 0;
+    for (NodeID v : chain) total += graph.node_weight[v];
+    if (total <= U) {
+      for (size_t i = 1; i < chain.size(); ++i) uf.unite(chain[0], chain[i]);
+    }
+  };
+
+  // Chains anchored at both ends by a vertex of degree != 2.
+  for (NodeID anchor = 0; anchor < static_cast<NodeID>(n); ++anchor) {
+    if (is_deg2[anchor]) continue;
+    for (EdgeID pos = graph.node_begin[anchor]; pos < graph.node_begin[anchor + 1]; ++pos) {
+      const NodeID cur = graph.adj[pos];
+      if (!is_deg2[cur] || visited[cur]) continue;
+      try_contract_chain(walk_chain_from(graph, is_deg2, visited, anchor, cur));
+    }
+  }
+
+  // Pure cycles: components with no anchor at all.
+  for (NodeID v = 0; v < static_cast<NodeID>(n); ++v) {
+    if (!is_deg2[v] || visited[v]) continue;
+    try_contract_chain(walk_chain_from(graph, is_deg2, visited, kInvalidNode, v));
+  }
+
+  return contract_graph(graph, uf);
+}
+
 }  // namespace filtering
 }  // namespace mt_kahypar
