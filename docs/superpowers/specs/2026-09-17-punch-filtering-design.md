@@ -194,10 +194,27 @@ simple-cycle edge case during design — see §4.5):
    `P` (`(e,f) ∈ P ⟺ e=f, or e,f form a 2-cut and neither is a 1-cut`) exactly.
 7. Monte Carlo with one-sided error; at 128 bits the collision probability is
    negligible at road-network scale, but each candidate class is still cheaply
-   verified (check the two representative edges' endpoints are actually
-   disconnected in `G` minus those two edges via a bounded local traversal)
-   before being trusted — an explicit, documented design decision, analogous
-   to the max-flow-choice note in §5.
+   verified before being trusted (see the correction below) — an explicit,
+   documented design decision, analogous to the max-flow-choice note in §5.
+
+   **Correction found during implementation (Task 7 review):** the
+   verification removes the entire candidate class `S` at once and checks
+   that two of its endpoints land in different components of `G − S` — not
+   an arbitrary pair of "the two representative edges," which is ambiguous
+   for classes larger than 2 and was never precisely defined. This whole-
+   class removal is sufficient, not merely a spot-check: signature equality
+   already implies every edge in the bucket shares the same fundamental-
+   cycle coverage set (up to the negligible collision probability), which by
+   the cographic-matroid argument in the correctness proof means every pair
+   within a genuine bucket is a valid 2-cut — confirming any one
+   representative pair (e.g. via whole-class removal) confirms the whole
+   bucket. This also clarifies a case that is easy to get wrong: a bucket
+   need not "look like" a single simple structure to be genuine — e.g. an
+   entire triangle's 3 edges all share one signature (its one chord's
+   fundamental cycle covers both of the triangle's tree edges) and correctly
+   form one class of size 3, since a triangle's own minimum edge cut is 2,
+   not 3. No shape-based special-casing (cycle detection, degree checks, etc.)
+   should ever be layered on top of the plain bucket-and-verify algorithm.
 8. For each verified class `S`, compute connected components of `G_S = (V, E∖S)`
    and union any component with size ≤ `U`, using the two-components-at-a-time
    traversal trick from the paper to bound total work to twice the size of the
