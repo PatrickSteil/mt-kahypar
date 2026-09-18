@@ -1784,7 +1784,17 @@ TEST(ContractComponentTreeTest, TauMergePreventsCascadingOverflow) {
 
   ContractionResult result = contract_component_tree(graph, TinyCutParams{6, 5});
 
+  // Only merged-together groups are checked against U here: R (weight 1000)
+  // is deliberately left untouched by this pass (see the design spec section
+  // 4.2 vs. section 6 distinction -- Part 1's own contraction rule makes no
+  // per-vertex U-cap promise on its own; only the full pipeline, via Part
+  // 2's alpha <= 1, guarantees the final U-invariant, which
+  // filtering_invariant_test.cc checks on the assembled fragments, not on
+  // Part 1's intermediate output). Skipping R's output vertex here checks
+  // exactly the regression this test targets (a merged group exceeding U)
+  // without asserting something Part 1 never promised.
   for (size_t v = 0; v < result.graph.numNodes(); ++v) {
+    if (v == result.mapping[0]) continue;
     EXPECT_LE(result.graph.node_weight[v], 6u) << "vertex " << v << " exceeds U";
   }
   EXPECT_NE(result.mapping[0], result.mapping[1]);  // R never merges with anything
