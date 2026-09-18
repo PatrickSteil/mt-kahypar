@@ -205,5 +205,28 @@ ContractionResult contract_degree2_chains(const FilterGraph& graph, NodeWeight U
   return contract_graph(graph, uf);
 }
 
+ContractionResult contract_two_edge_cuts(const FilterGraph& graph, NodeWeight U) {
+  const size_t n = graph.numNodes();
+  std::vector<NodeID> component = parallel_connected_components(graph);
+  SpanningForest forest = build_spanning_forest(graph, component, {});
+  EdgeSignatures sigs = compute_edge_signatures(graph, forest);
+  std::vector<std::vector<EdgeID>> classes = find_two_edge_cut_classes(graph, sigs);
+
+  AtomicUnionFind uf(n);
+  for (const std::vector<EdgeID>& cls : classes) {
+    std::vector<char> excluded(graph.numEdges(), 0);
+    for (EdgeID e : cls) excluded[e] = 1;
+    std::vector<NodeID> comp = parallel_connected_components_excluding(graph, excluded);
+
+    std::unordered_map<NodeID, NodeWeight> comp_weight;
+    for (size_t v = 0; v < n; ++v) comp_weight[comp[v]] += graph.node_weight[v];
+
+    for (size_t v = 0; v < n; ++v) {
+      if (comp_weight[comp[v]] <= U) uf.unite(static_cast<NodeID>(v), comp[v]);
+    }
+  }
+  return contract_graph(graph, uf);
+}
+
 }  // namespace filtering
 }  // namespace mt_kahypar

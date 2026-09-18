@@ -29,5 +29,10 @@ ContractionResult contract_component_tree(const FilterGraph& graph, const TinyCu
 // no anchor of different degree) is treated as one chain.
 ContractionResult contract_degree2_chains(const FilterGraph& graph, NodeWeight U);
 
+// Part 1, pass 3 (design spec section 4.4): finds 2-edge-cut equivalence
+// classes and, for each class S, contracts every connected component of
+// (V, E \ S) whose total weight is <= U.
+ContractionResult contract_two_edge_cuts(const FilterGraph& graph, NodeWeight U);
+
 }  // namespace filtering
 }  // namespace mt_kahypar
