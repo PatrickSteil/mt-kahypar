@@ -228,5 +228,21 @@ ContractionResult contract_two_edge_cuts(const FilterGraph& graph, NodeWeight U)
   return contract_graph(graph, uf);
 }
 
+ContractionResult run_tiny_cut_detection(const FilterGraph& graph, const TinyCutParams& params) {
+  ContractionResult r1 = contract_component_tree(graph, params);
+  ContractionResult r2 = contract_degree2_chains(r1.graph, params.U);
+  ContractionResult r3 = contract_two_edge_cuts(r2.graph, params.U);
+
+  std::vector<NodeID> composed(graph.numNodes());
+  for (size_t v = 0; v < graph.numNodes(); ++v) {
+    composed[v] = r3.mapping[r2.mapping[r1.mapping[v]]];
+  }
+
+  ContractionResult result;
+  result.graph = std::move(r3.graph);
+  result.mapping = std::move(composed);
+  return result;
+}
+
 }  // namespace filtering
 }  // namespace mt_kahypar

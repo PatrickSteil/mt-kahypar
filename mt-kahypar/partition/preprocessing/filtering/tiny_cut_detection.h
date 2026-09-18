@@ -34,5 +34,10 @@ ContractionResult contract_degree2_chains(const FilterGraph& graph, NodeWeight U
 // (V, E \ S) whose total weight is <= U.
 ContractionResult contract_two_edge_cuts(const FilterGraph& graph, NodeWeight U);
 
+// Runs all three tiny-cut passes in sequence (design spec section 4),
+// composing their node mappings so the result maps the ORIGINAL input
+// graph's vertices directly to the final, smallest output graph's vertices.
+ContractionResult run_tiny_cut_detection(const FilterGraph& graph, const TinyCutParams& params);
+
 }  // namespace filtering
 }  // namespace mt_kahypar

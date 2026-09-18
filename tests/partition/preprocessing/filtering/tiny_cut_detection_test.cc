@@ -198,3 +198,33 @@ TEST(ContractTwoEdgeCutsTest, LeavesHeavySideUncontracted) {
   EXPECT_NE(result.mapping[0], result.mapping[1]);
   EXPECT_EQ(result.mapping[2], result.mapping[3]);
 }
+
+TEST(RunTinyCutDetectionTest, ComposesMappingAcrossAllThreePasses) {
+  // A path of 6 light vertices (0..5) hanging off a heavy triangle (6,7,8)
+  // via a bridge (5,6). Pass 1 should contract the light path's bridge-
+  // isolated subtree if small enough; whatever survives should still respect
+  // the invariant that every original vertex maps to some final vertex, and
+  // the heavy triangle should never merge with anything (it's the largest
+  // component and stays intact since U is too small to touch it).
+  std::vector<NodeWeight> weights = {1, 1, 1, 1, 1, 1, 100, 100, 100};
+  std::vector<EdgeListEntry> edges = {
+    {0, 1, 1}, {1, 2, 1}, {2, 3, 1}, {3, 4, 1}, {4, 5, 1},
+    {5, 6, 1},
+    {6, 7, 1}, {7, 8, 1}, {6, 8, 1}
+  };
+  FilterGraph graph = build_csr_from_edge_list(edges, weights);
+
+  ContractionResult result = run_tiny_cut_detection(graph, TinyCutParams{6, 5});
+
+  ASSERT_EQ(result.mapping.size(), 9u);
+  for (NodeID v = 0; v < 9; ++v) EXPECT_LT(result.mapping[v], result.graph.numNodes());
+
+  NodeWeight total_original = 0, total_output = 0;
+  for (NodeWeight w : weights) total_original += w;
+  for (size_t v = 0; v < result.graph.numNodes(); ++v) total_output += result.graph.node_weight[v];
+  EXPECT_EQ(total_original, total_output);
+
+  // The heavy triangle vertices must all still be distinguishable from the
+  // light path (they're far too heavy, individually, to be absorbed).
+  EXPECT_NE(result.mapping[6], result.mapping[0]);
+}
