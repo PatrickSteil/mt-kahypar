@@ -158,39 +158,43 @@ TEST(ContractDegree2ChainsTest, ContractsAPureCycleWithNoAnchor) {
 }
 
 namespace {
-// A "bowtie": two triangles {0,1,2} and {2,3,4} sharing vertex 2. This graph
-// has exactly two 2-edge-cut classes: {(1,2),(0,2)} isolating {0,1} from
-// {2,3,4}, and {(2,3),(2,4)} isolating {3,4} from {0,1,2}. Edge (0,1) and
-// (3,4) are each 3-edge-connected within their own triangle and belong to no
-// cut class.
-FilterGraph make_bowtie(NodeWeight w0, NodeWeight w1, NodeWeight w2, NodeWeight w3, NodeWeight w4) {
-  std::vector<NodeWeight> weights = {w0, w1, w2, w3, w4};
+// A "double bridge": hub 0 with a pendant leaf 1 (bridge (0,1)), hub 2 with a
+// pendant leaf 3 (bridge (2,3)), and hub 0 connected to hub 2 by TWO parallel
+// edges. The two edges between hub 0 and hub 2 are literal parallel edges
+// between the same vertex pair, so their fundamental-cycle relationship is
+// direct (one is the spanning tree edge, the other's fundamental cycle
+// covers exactly that one edge and nothing else) -- no ambient cycle pulls
+// in the bridges (0,1)/(2,3), which are correctly excluded as 1-cuts. The
+// genuine 2-cut class is exactly the 2 parallel edges, and removing them
+// isolates {0,1} from {2,3}, both genuine multi-vertex components.
+FilterGraph make_double_bridge(NodeWeight w0, NodeWeight w1, NodeWeight w2, NodeWeight w3) {
+  std::vector<NodeWeight> weights = {w0, w1, w2, w3};
   std::vector<EdgeListEntry> edges = {
-    {0, 1, 1}, {1, 2, 1}, {0, 2, 1},
-    {2, 3, 1}, {2, 4, 1}, {3, 4, 1}
+    {0, 1, 1},  // bridge: leaf 1 off hub 0
+    {2, 3, 1},  // bridge: leaf 3 off hub 2
+    {0, 2, 1},  // connector 1 of the parallel pair
+    {0, 2, 1}   // connector 2 of the parallel pair
   };
   return build_csr_from_edge_list(edges, weights);
 }
 }  // namespace
 
-TEST(ContractTwoEdgeCutsTest, ContractsBothSmallSidesOfABowtie) {
-  FilterGraph graph = make_bowtie(1, 1, 100, 1, 1);
+TEST(ContractTwoEdgeCutsTest, ContractsBothSmallSidesOfADoubleBridge) {
+  FilterGraph graph = make_double_bridge(1, 1, 1, 1);
   ContractionResult result = contract_two_edge_cuts(graph, 5);
 
-  EXPECT_EQ(result.graph.numNodes(), 3u);
+  EXPECT_EQ(result.graph.numNodes(), 2u);
   EXPECT_EQ(result.mapping[0], result.mapping[1]);
-  EXPECT_EQ(result.mapping[3], result.mapping[4]);
+  EXPECT_EQ(result.mapping[2], result.mapping[3]);
   EXPECT_NE(result.mapping[0], result.mapping[2]);
-  EXPECT_NE(result.mapping[2], result.mapping[3]);
-  EXPECT_NE(result.mapping[0], result.mapping[3]);
 }
 
 TEST(ContractTwoEdgeCutsTest, LeavesHeavySideUncontracted) {
-  // {0,1} together weigh 100, too heavy to contract at U = 5, but {3,4}
+  // {0,1} together weigh 100, too heavy to contract at U = 5, but {2,3}
   // (weight 2) still qualifies.
-  FilterGraph graph = make_bowtie(50, 50, 1, 1, 1);
+  FilterGraph graph = make_double_bridge(50, 50, 1, 1);
   ContractionResult result = contract_two_edge_cuts(graph, 5);
 
   EXPECT_NE(result.mapping[0], result.mapping[1]);
-  EXPECT_EQ(result.mapping[3], result.mapping[4]);
+  EXPECT_EQ(result.mapping[2], result.mapping[3]);
 }
