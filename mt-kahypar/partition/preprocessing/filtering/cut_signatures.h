@@ -27,5 +27,17 @@ EdgeSignatures compute_edge_signatures(const FilterGraph& graph, const SpanningF
 // alone already connects the graph without them.
 std::vector<char> compute_bridges(const FilterGraph& graph, const EdgeSignatures& sigs);
 
+// Finds all 2-edge-cut equivalence classes of `graph` (design spec section
+// 4.4): buckets every non-bridge edge by its signature (tree edges by their
+// aggregated label, non-tree edges by their own label -- see
+// compute_edge_signatures), then verifies each candidate class of size >= 2
+// by checking that its first two edges' removal actually disconnects the
+// graph locally. Verified classes are returned; unverified (collision)
+// candidates are dropped (Monte Carlo false positives are astronomically
+// rare at 128 bits, but the check is cheap enough to always do -- see design
+// spec section 4.4 step 7).
+std::vector<std::vector<EdgeID>> find_two_edge_cut_classes(const FilterGraph& graph,
+                                                            const EdgeSignatures& sigs);
+
 }  // namespace filtering
 }  // namespace mt_kahypar
