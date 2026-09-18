@@ -5,7 +5,8 @@ set(PreprocessingSources
         filtering/dimacs_io.cpp
         filtering/graph_contraction.cpp
         filtering/parallel_connectivity.cpp
-        filtering/cut_signatures.cpp)
+        filtering/cut_signatures.cpp
+        filtering/tiny_cut_detection.cpp)
 
 target_sources(MtKaHyPar-Sources INTERFACE ${PreprocessingSources})
 target_sources(MtKaHyPar-ToolsSources INTERFACE ${PreprocessingSources})

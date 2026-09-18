@@ -6,4 +6,5 @@ target_sources(mtkahypar_tests PRIVATE
         filtering/graph_contraction_test.cc
         filtering/parallel_connectivity_test.cc
         filtering/cut_signatures_test.cc
+        filtering/tiny_cut_detection_test.cc
         )
