@@ -8,4 +8,5 @@ target_sources(mtkahypar_tests PRIVATE
         filtering/cut_signatures_test.cc
         filtering/tiny_cut_detection_test.cc
         filtering/dinic_max_flow_test.cc
+        filtering/natural_cut_detection_test.cc
         )
