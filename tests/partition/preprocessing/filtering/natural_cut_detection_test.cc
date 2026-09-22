@@ -3,6 +3,8 @@
 #include <algorithm>
 #include <random>
 
+#include <tbb/global_control.h>
+
 #include "mt-kahypar/partition/preprocessing/filtering/natural_cut_detection.h"
 
 using namespace mt_kahypar::filtering;
@@ -133,13 +135,24 @@ TEST(RunNaturalCutDetectionParallelTest, WholeSmallGraphAbsorbedYieldsNoCuts) {
 }
 
 TEST(RunNaturalCutDetectionParallelTest, LongPathKeepsSomeEdgesAndNeverCrashes) {
-  const int len = 200;
+  // Force real thread contention rather than hoping for it: without an
+  // explicit tbb::global_control, TBB's default arena sizing on a
+  // lightly-loaded or constrained CI box could partition 200 elements into
+  // chunks large enough that two threads never actually race on the same
+  // covered/keep index, letting a subtly wrong CAS/flush implementation
+  // pass by accident. Widening the graph and capping parallelism at a
+  // value clearly larger than 1 (but still <= this machine's core count)
+  // makes genuine cross-thread interleaving on shared state far more
+  // likely across repeated trials.
+  tbb::global_control control(tbb::global_control::max_allowed_parallelism, 8);
+
+  const int len = 500;
   std::vector<NodeWeight> weights(len, 1);
   std::vector<EdgeListEntry> edges;
   for (int i = 0; i + 1 < len; ++i) edges.push_back({static_cast<NodeID>(i), static_cast<NodeID>(i + 1), 1});
   FilterGraph graph = build_csr_from_edge_list(edges, weights);
 
-  for (int trial = 0; trial < 5; ++trial) {
+  for (int trial = 0; trial < 10; ++trial) {
     std::vector<char> keep = run_natural_cut_detection(graph, NaturalCutParams{5, 1.0, 10.0, 2});
     ASSERT_EQ(keep.size(), static_cast<size_t>(len - 1));
     bool any_kept = false;
