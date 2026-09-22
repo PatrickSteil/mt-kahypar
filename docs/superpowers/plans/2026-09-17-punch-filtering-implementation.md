@@ -2789,11 +2789,22 @@ std::vector<EdgeID> compute_natural_cut(const FilterGraph& graph, NodeID seed,
     }
   }
 
+  // Add vertices to the core, checking the threshold AFTER each add (not
+  // before). This is deliberate, not an off-by-one: checking before adding
+  // means the very first vertex is only admitted if target_core_size > 0,
+  // so a small U/f combination that floors target_core_size to 0 (e.g.
+  // U=3, f=10 gives alpha*U/f=0.3, truncated to 0) would leave core
+  // permanently empty -- the seed itself never gets in -- which then
+  // starves the local flow network's source of any identity. Checking
+  // after admitting guarantees core always contains at least the seed,
+  // regardless of how small target_core_size rounds down to. Found as a
+  // real bug during Task 13's implementation (reported BLOCKED rather than
+  // silently "fixed" by guessing) -- see the plan's ledger for the ruling.
   NodeWeight running = 0;
   for (NodeID v : scratch.tree_order) {
-    if (running >= target_core_size) break;
     scratch.in_core[v] = 1;
     running += graph.node_weight[v];
+    if (running >= target_core_size) break;
   }
 
   std::vector<NodeID> ring;
