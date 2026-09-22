@@ -31,7 +31,6 @@ std::vector<EdgeID> compute_natural_cut(const FilterGraph& graph, NodeID seed,
   scratch.in_tree[seed] = 1;
   scratch.tree_order.push_back(seed);
   tree_size += graph.node_weight[seed];
-  covered[seed] = 1;
 
   while (head < scratch.bfs_queue.size() && tree_size < target_tree_size) {
     const NodeID u = scratch.bfs_queue[head++];
@@ -43,7 +42,6 @@ std::vector<EdgeID> compute_natural_cut(const FilterGraph& graph, NodeID seed,
       scratch.tree_order.push_back(v);
       scratch.bfs_queue.push_back(v);
       tree_size += graph.node_weight[v];
-      covered[v] = 1;
     }
   }
 
@@ -56,9 +54,38 @@ std::vector<EdgeID> compute_natural_cut(const FilterGraph& graph, NodeID seed,
   // starves the local flow network's source of any identity. Checking
   // after admitting guarantees core always contains at least the seed,
   // regardless of how small target_core_size rounds down to.
+  //
+  // `covered[v]` is marked HERE, for CORE vertices only -- not in the BFS
+  // growth loop above for every TREE vertex. This is the paper's own
+  // stopping rule, not an arbitrary choice: "we accomplish this by picking
+  // v uniformly at random among all vertices that have not yet been part
+  // of any CORE" (design spec section 5). It is also load-bearing for the
+  // hard U-invariant, not merely cosmetic: the local min s-t cut's
+  // reachable-from-s side R always contains the whole core (core defines
+  // s) and is bounded in weight by the tree's own size (<= alpha*U), AND
+  // every edge leaving R in the WHOLE original graph is captured by this
+  // local cut (R's vertices are confined to the tree, whose only external
+  // neighbors are, by definition, the ring -- there is no escape route
+  // outside the local flow network). So once a vertex has been part of
+  // ANY core, its eventual fragment is provably a subset of that
+  // bounded, fully-fenced-off R, hence <= alpha*U <= U.
+  //
+  // A vertex that was only ever part of some OTHER seed's TREE (but never
+  // that seed's own core) sits on the far, unbounded side of that cut and
+  // gets no such guarantee -- it must eventually become a seed itself (and
+  // thus enter its OWN core) for the invariant to apply to it. Marking
+  // whole-tree membership as "covered" (an earlier, incorrect version of
+  // this function) prevents that from ever happening for such vertices,
+  // which is exactly what let a later integration test find fragments up
+  // to ~3x over U on 9/10 random seeds -- confirmed by an independent
+  // simulation (both semantics, 10 seeds each, U=20): tree-covered
+  // semantics failed 9/10 (worst fragment 65), core-covered semantics
+  // failed 0/10 (worst fragment 5). Do not move this marking back into
+  // the BFS loop.
   NodeWeight running = 0;
   for (NodeID v : scratch.tree_order) {
     scratch.in_core[v] = 1;
+    covered[v] = 1;
     running += graph.node_weight[v];
     if (running >= target_core_size) break;
   }

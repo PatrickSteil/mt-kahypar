@@ -30,9 +30,14 @@ TEST(ComputeNaturalCutTest, FindsTheOnlyPossibleCutOnAUnitPath) {
   ASSERT_EQ(cut.size(), 1u);
   EXPECT_EQ(cut[0], 0u);  // canonical edge id of (0,1), the first edge added
 
+  // Only CORE membership marks covered -- not whole-tree membership (see
+  // the core-selection loop's comment in the implementation for why this
+  // distinction is load-bearing for the U-invariant, not cosmetic).
+  // core = {0} only here, so vertices 1 and 2 (tree but not core) are NOT
+  // marked covered, even though the BFS visited them.
   EXPECT_TRUE(covered[0]);
-  EXPECT_TRUE(covered[1]);
-  EXPECT_TRUE(covered[2]);
+  EXPECT_FALSE(covered[1]);  // tree, not core -- not marked covered
+  EXPECT_FALSE(covered[2]);  // tree, not core -- not marked covered
   EXPECT_FALSE(covered[3]);  // ring, not tree -- not marked covered
   EXPECT_FALSE(covered[4]);  // never visited
 }
@@ -87,10 +92,13 @@ TEST(ComputeNaturalCutTest, HandlesMultiVertexCoreRingAndBranchingCut) {
   EXPECT_EQ(cut[0], 2u);  // e2 = (1,3)
   EXPECT_EQ(cut[1], 3u);  // e3 = (2,4)
 
+  // Only CORE membership marks covered. core = {0,1} here, so
+  // tree-interior vertices 2 and 3 are NOT marked covered even though the
+  // BFS visited them and they participate in the local flow network.
   EXPECT_TRUE(covered[0]);
   EXPECT_TRUE(covered[1]);
-  EXPECT_TRUE(covered[2]);
-  EXPECT_TRUE(covered[3]);
+  EXPECT_FALSE(covered[2]);  // tree, not core -- not marked covered
+  EXPECT_FALSE(covered[3]);  // tree, not core -- not marked covered
   EXPECT_FALSE(covered[4]);  // ring, not tree
   EXPECT_FALSE(covered[5]);  // ring, not tree
 }

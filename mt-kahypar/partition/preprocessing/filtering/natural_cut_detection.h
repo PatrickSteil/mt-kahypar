@@ -30,10 +30,15 @@ struct NaturalCutScratch {
 // Grows a BFS tree from `seed` until its total vertex weight reaches
 // params.U * params.alpha, computes the local min s-t cut between the
 // resulting core (contracted to s) and ring (contracted to t), and returns
-// the canonical edge ids of `graph` forming that min cut. Every vertex
-// visited by the BFS growth (the tree) is marked covered[v] = true; ring
-// vertices are not marked (design spec section 5). `covered` must have size
-// graph.numNodes().
+// the canonical edge ids of `graph` forming that min cut. Only vertices
+// that end up in the CORE are marked covered[v] = true -- not every
+// vertex visited by the wider BFS growth, and not ring vertices. This
+// matches the paper's own stopping rule ("pick uniformly at random among
+// vertices that have not yet been part of any core", design spec section
+// 5) and is load-bearing for the hard U-invariant: only core membership
+// guarantees a vertex's eventual fragment is bounded by U (see the
+// in-line comment at the core-selection loop in the .cpp for the full
+// argument). `covered` must have size graph.numNodes().
 std::vector<EdgeID> compute_natural_cut(const FilterGraph& graph, NodeID seed,
                                          const NaturalCutParams& params,
                                          NaturalCutScratch& scratch,
