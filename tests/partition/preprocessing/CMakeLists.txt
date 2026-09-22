@@ -9,4 +9,5 @@ target_sources(mtkahypar_tests PRIVATE
         filtering/tiny_cut_detection_test.cc
         filtering/dinic_max_flow_test.cc
         filtering/natural_cut_detection_test.cc
+        filtering/fragment_assembly_test.cc
         )

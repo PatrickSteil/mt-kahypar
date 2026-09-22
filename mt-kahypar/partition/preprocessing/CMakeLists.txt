@@ -8,7 +8,8 @@ set(PreprocessingSources
         filtering/cut_signatures.cpp
         filtering/tiny_cut_detection.cpp
         filtering/dinic_max_flow.cpp
-        filtering/natural_cut_detection.cpp)
+        filtering/natural_cut_detection.cpp
+        filtering/fragment_assembly.cpp)
 
 target_sources(MtKaHyPar-Sources INTERFACE ${PreprocessingSources})
 target_sources(MtKaHyPar-ToolsSources INTERFACE ${PreprocessingSources})
