@@ -48,5 +48,15 @@ std::vector<char> run_natural_cut_detection_sequential(const FilterGraph& graph,
                                                         const NaturalCutParams& params,
                                                         std::mt19937_64& rng);
 
+// Parallel counterpart to run_natural_cut_detection_sequential, with the
+// same semantics (design spec section 5): per sweep, a pre-shuffled vertex
+// order is scanned by a TBB parallel_for; each task atomically claims its
+// vertex as a new seed via compare-exchange on a per-vertex `covered` flag
+// (skipping on failure), then runs compute_natural_cut using thread-local
+// scratch buffers. `keep` flags are set with plain relaxed atomic stores
+// (a monotonic boolean needs no compare-exchange). A short serial mop-up
+// pass handles any vertices left uncovered by races near the scan's end.
+std::vector<char> run_natural_cut_detection(const FilterGraph& graph, const NaturalCutParams& params);
+
 }  // namespace filtering
 }  // namespace mt_kahypar

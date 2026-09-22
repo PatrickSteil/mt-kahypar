@@ -121,3 +121,29 @@ TEST(RunNaturalCutDetectionSequentialTest, LongPathKeepsSomeEdges) {
   for (char k : keep) any_kept = any_kept || k;
   EXPECT_TRUE(any_kept);
 }
+
+TEST(RunNaturalCutDetectionParallelTest, WholeSmallGraphAbsorbedYieldsNoCuts) {
+  std::vector<NodeWeight> weights = {1, 1, 1};
+  std::vector<EdgeListEntry> edges = {{0, 1, 1}, {1, 2, 1}, {0, 2, 1}};
+  FilterGraph graph = build_csr_from_edge_list(edges, weights);
+
+  std::vector<char> keep = run_natural_cut_detection(graph, NaturalCutParams{1000, 1.0, 10.0, 2});
+  ASSERT_EQ(keep.size(), 3u);
+  for (char k : keep) EXPECT_EQ(k, 0);
+}
+
+TEST(RunNaturalCutDetectionParallelTest, LongPathKeepsSomeEdgesAndNeverCrashes) {
+  const int len = 200;
+  std::vector<NodeWeight> weights(len, 1);
+  std::vector<EdgeListEntry> edges;
+  for (int i = 0; i + 1 < len; ++i) edges.push_back({static_cast<NodeID>(i), static_cast<NodeID>(i + 1), 1});
+  FilterGraph graph = build_csr_from_edge_list(edges, weights);
+
+  for (int trial = 0; trial < 5; ++trial) {
+    std::vector<char> keep = run_natural_cut_detection(graph, NaturalCutParams{5, 1.0, 10.0, 2});
+    ASSERT_EQ(keep.size(), static_cast<size_t>(len - 1));
+    bool any_kept = false;
+    for (char k : keep) any_kept = any_kept || k;
+    EXPECT_TRUE(any_kept);
+  }
+}
