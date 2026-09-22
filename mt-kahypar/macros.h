@@ -40,7 +40,7 @@
 #define THREAD_ID std::max(0, tbb::this_task_arena::current_thread_index())
 #else
 #ifdef _WIN32
-#include <processthreadsapi.h>
+#include <windows.h>
 #define THREAD_ID GetCurrentProcessorNumber()
 #else
 #include <sched.h>
@@ -159,6 +159,9 @@
   throw InvalidInputException(ss.str())
 #else
 #define MT_KAHYPAR_IS_LIBRARY_MODE false
+#ifdef KAHYPAR_ENABLE_THREAD_PINNING
+#define MT_KAHYPAR_USE_THREAD_PINNING
+#endif
 
 #define ALGO_SWITCH(warning_msg, error_msg, context_variable,                  \
                     alternative_value)                                         \

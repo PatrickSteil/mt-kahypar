@@ -40,8 +40,8 @@ TwoHopClustering::TwoHopClustering(const HypernodeID num_nodes, const Context& c
   _cluster_count(num_nodes, AtomicID(0)),
   _local_cluster_count(std::thread::hardware_concurrency()),
   _favorite_clusters(),
-  _local_incidence_map([=] {
-    return CacheEfficienIncidenceMap(3UL * std::min(UL(num_nodes), _context.coarsening.two_hop_degree_threshold), 0.0);
+  _local_incidence_map([this, num_nodes] {
+    return CacheEfficienIncidenceMap(3UL * std::min(UL(num_nodes), this->_context.coarsening.two_hop_degree_threshold), 0.0);
   }),
   _local_collected_nodes(std::thread::hardware_concurrency()) {
     if (_context.coarsening.two_hop_cluster_size < 2) {
@@ -52,8 +52,7 @@ TwoHopClustering::TwoHopClustering(const HypernodeID num_nodes, const Context& c
 template<typename Hypergraph>
 void TwoHopClustering::performClustering(const Hypergraph& hg,
                                          const vec<HypernodeID>& node_mapping,
-                                         ClusteringContext<Hypergraph>& cc,
-                                         bool has_fixed_vertices) {
+                                         ClusteringContext<Hypergraph>& cc) {
   // reset
   tbb::parallel_invoke([&] {
     tbb::parallel_for(ID(0), hg.initialNumNodes(), [&](HypernodeID hn) {
@@ -155,20 +154,19 @@ void TwoHopClustering::performClustering(const Hypergraph& hg,
       local_nodes.end());
 
     // cluster nodes incident to "high-degree" clusters locally, to avoid scalability bottlenecks
-    matchVerticesInBucket(hg, cc, local_nodes, has_fixed_vertices);
+    matchVerticesInBucket(hg, cc, local_nodes);
   });
 
   tbb::parallel_for(UL(0), _favorite_clusters.numBuckets(), [&](const size_t bucket_id) {
     auto& bucket = _favorite_clusters.getBucket(bucket_id);
-    matchVerticesInBucket(hg, cc, bucket, has_fixed_vertices);
+    matchVerticesInBucket(hg, cc, bucket);
   });
 }
 
 template<typename Hypergraph>
 void TwoHopClustering::matchVerticesInBucket(const Hypergraph& hg,
                                              ClusteringContext<Hypergraph>& cc,
-                                             vec<MatchingEntry>& bucket,
-                                             bool has_fixed_vertices) {
+                                             vec<MatchingEntry>& bucket) {
   auto bucket_comparator = [&](const MatchingEntry& lhs, const MatchingEntry& rhs) {
     if (lhs.target == rhs.target) {
       return hg.communityID(lhs.hn) < hg.communityID(rhs.hn);
@@ -180,14 +178,19 @@ void TwoHopClustering::matchVerticesInBucket(const Hypergraph& hg,
 
   // match nodes that have the same favorite cluster
   const HypernodeID max_size = _context.coarsening.two_hop_cluster_size;
+  const bool has_fixed_vertices = hg.hasFixedVertices();
   for (size_t i = 0; i + 1 < bucket.size() && cc.shouldContinue(); ++i) {
     HypernodeID offset = 0;
     for (size_t j = i + 1; j < i + max_size && j < bucket.size() && cc.shouldContinue()
           && bucket[i].target == bucket[j].target && hg.communityID(bucket[i].hn) == hg.communityID(bucket[j].hn); ++j) {
       ASSERT((j > i + 1 || cc.vertexIsUnmatched(bucket[i].hn)) && cc.vertexIsUnmatched(bucket[j].hn));
-      // Note: cluster weight and fixed vertices are checked by `matchVertices` (might not succeed)
-      // j must be left, since only the right node is allowed to already be matched
-      bool success = cc.matchVertices(hg, bucket[j].hn, bucket[i].hn, has_fixed_vertices);
+
+      // Note: cluster weight is checked by `matchVertices` (might not succeed)
+      // contraction direction is j -> i, since only the right side is allowed to already be matched
+      bool success = false;
+      if (!has_fixed_vertices || cc.acceptFixedVertexContraction(hg, _context, bucket[j].hn, bucket[i].hn)) {
+        success = cc.matchVertices(hg, bucket[j].hn, bucket[i].hn);
+      }
       if (!success) {
         break;
       }
@@ -200,8 +203,7 @@ void TwoHopClustering::matchVerticesInBucket(const Hypergraph& hg,
 namespace {
   #define PERFORM_CLUSTERING(X) void TwoHopClustering::performClustering(const X& hg,                          \
                                                                          const vec<HypernodeID>& node_mapping, \
-                                                                         ClusteringContext<X>& cc,             \
-                                                                         bool has_fixed_vertices)
+                                                                         ClusteringContext<X>& cc)
 }
 
 INSTANTIATE_FUNC_WITH_HYPERGRAPHS(PERFORM_CLUSTERING)
