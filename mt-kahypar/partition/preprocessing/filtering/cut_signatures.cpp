@@ -3,8 +3,6 @@
 #include <random>
 #include <unordered_map>
 
-#include "mt-kahypar/partition/preprocessing/filtering/parallel_connectivity.h"
-
 namespace mt_kahypar {
 namespace filtering {
 
@@ -79,28 +77,11 @@ struct SignatureHash {
     return std::hash<uint64_t>()(hi) ^ (std::hash<uint64_t>()(lo) * 0x9e3779b97f4a7c15ULL);
   }
 };
-
-// A class is verified if removing all its edges actually disconnects at
-// least one pair of its incident vertices from each other. This is a
-// sufficient check because signature equality already implies identical
-// fundamental-cycle coverage sets for every edge in the bucket (up to an
-// astronomically rare 128-bit collision), which means every pair within
-// a genuine bucket forms a valid 2-cut.
-bool verify_class_disconnects(const FilterGraph& graph, const std::vector<EdgeID>& cls) {
-  std::vector<char> excluded(graph.numEdges(), 0);
-  for (EdgeID e : cls) excluded[e] = 1;
-  std::vector<NodeID> component = parallel_connected_components_excluding(graph, excluded);
-  auto endpoints = compute_edge_endpoints(graph);
-  const NodeID u = endpoints[cls[0]].first;
-  const NodeID v = endpoints[cls[0]].second;
-  return component[u] != component[v];
-}
 }  // namespace
 
-std::vector<std::vector<EdgeID>> find_two_edge_cut_classes(const FilterGraph& graph,
-                                                            const EdgeSignatures& sigs) {
+std::vector<std::vector<EdgeID>> find_two_edge_cut_classes(const EdgeSignatures& sigs) {
   std::unordered_map<unsigned __int128, std::vector<EdgeID>, SignatureHash> buckets;
-  for (EdgeID e = 0; e < static_cast<EdgeID>(graph.numEdges()); ++e) {
+  for (EdgeID e = 0; e < static_cast<EdgeID>(sigs.signature.size()); ++e) {
     const bool is_bridge = sigs.is_tree_edge[e] && sigs.signature[e] == 0;
     if (is_bridge) continue;
     buckets[sigs.signature[e]].push_back(e);
@@ -109,7 +90,7 @@ std::vector<std::vector<EdgeID>> find_two_edge_cut_classes(const FilterGraph& gr
   std::vector<std::vector<EdgeID>> classes;
   for (auto& [signature, edges] : buckets) {
     if (edges.size() < 2) continue;
-    if (verify_class_disconnects(graph, edges)) classes.push_back(std::move(edges));
+    classes.push_back(std::move(edges));
   }
   return classes;
 }

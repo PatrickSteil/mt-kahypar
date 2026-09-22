@@ -199,6 +199,48 @@ TEST(ContractTwoEdgeCutsTest, LeavesHeavySideUncontracted) {
   EXPECT_EQ(result.mapping[2], result.mapping[3]);
 }
 
+TEST(ContractTwoEdgeCutsTest, ManyIndependentClassesProcessInParallelCorrectly) {
+  // A "star of double-bridges": a heavy central hub C (vertex 0, weight
+  // 100 -- always too heavy to contract with anything) with num_units
+  // satellite (hub_i, leaf_i) pairs, each connected to C via its OWN pair
+  // of parallel edges (its own independent 2-edge-cut class) plus a
+  // hub_i-leaf_i bridge. Deliberately NOT a chain of double-bridges: a
+  // chain would make each cut isolate a GROWING prefix of the chain
+  // (nesting classes' effects together), which stops being independent
+  // once the prefix exceeds U -- exactly the kind of test-design mistake
+  // this plan has hit before (see the design comment on make_double_bridge
+  // above). A star keeps every class's "small side" to exactly one
+  // {hub_i, leaf_i} pair (weight 2 <= U = 5), regardless of how many other
+  // units exist, so this genuinely exercises `num_units` independent
+  // classes processed in parallel by one contract_two_edge_cuts call --
+  // regression-testing the fix for Task 19's real-world-validation finding
+  // that this loop needed to be parallelized.
+  const int num_units = 50;
+  std::vector<NodeWeight> weights = {100};  // vertex 0 = C
+  std::vector<EdgeListEntry> edges;
+  for (int i = 0; i < num_units; ++i) {
+    const NodeID hub = static_cast<NodeID>(1 + 2 * i);
+    const NodeID leaf = static_cast<NodeID>(2 + 2 * i);
+    weights.push_back(1);  // hub
+    weights.push_back(1);  // leaf
+    edges.push_back({hub, leaf, 1});      // bridge
+    edges.push_back({NodeID(0), hub, 1}); // parallel edge 1 to C
+    edges.push_back({NodeID(0), hub, 1}); // parallel edge 2 to C
+  }
+  FilterGraph graph = build_csr_from_edge_list(edges, weights);
+
+  ContractionResult result = contract_two_edge_cuts(graph, 5);
+
+  for (int i = 0; i < num_units; ++i) {
+    const NodeID hub = static_cast<NodeID>(1 + 2 * i);
+    const NodeID leaf = static_cast<NodeID>(2 + 2 * i);
+    EXPECT_EQ(result.mapping[hub], result.mapping[leaf]) << "unit " << i;
+    EXPECT_NE(result.mapping[hub], result.mapping[0]) << "unit " << i << " vs center";
+  }
+  // Every unit contracts to its own vertex, plus C stays on its own.
+  EXPECT_EQ(result.graph.numNodes(), static_cast<size_t>(num_units + 1));
+}
+
 TEST(RunTinyCutDetectionTest, ComposesMappingAcrossAllThreePasses) {
   // A path of 6 light vertices (0..5) hanging off a heavy triangle (6,7,8)
   // via a bridge (5,6). Pass 1 should contract the light path's bridge-

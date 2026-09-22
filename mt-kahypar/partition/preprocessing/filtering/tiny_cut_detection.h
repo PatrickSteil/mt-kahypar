@@ -31,7 +31,11 @@ ContractionResult contract_degree2_chains(const FilterGraph& graph, NodeWeight U
 
 // Part 1, pass 3 (design spec section 4.4): finds 2-edge-cut equivalence
 // classes and, for each class S, contracts every connected component of
-// (V, E \ S) whose total weight is <= U.
+// (V, E \ S) whose total weight is <= U. Classes are processed in
+// parallel (see the implementation comment) -- real road-network graphs
+// can produce tens of thousands of classes (Task 19's DIMACS validation
+// found ~38K on a 264K-vertex instance), each requiring an O(n+m) graph
+// scan, which does not finish in reasonable time run sequentially.
 ContractionResult contract_two_edge_cuts(const FilterGraph& graph, NodeWeight U);
 
 // Runs all three tiny-cut passes in sequence (design spec section 4),

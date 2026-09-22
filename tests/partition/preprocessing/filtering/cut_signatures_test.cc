@@ -81,7 +81,7 @@ TEST(CutSignaturesTest, CycleGraphIsOneClassOfAllEdges) {
   FilterGraph graph = build_csr_from_edge_list(edges, weights);
   EdgeSignatures sigs = signatures_for(graph);
 
-  std::vector<std::vector<EdgeID>> classes = find_two_edge_cut_classes(graph, sigs);
+  std::vector<std::vector<EdgeID>> classes = find_two_edge_cut_classes(sigs);
   ASSERT_EQ(classes.size(), 1u);
   EXPECT_EQ(classes[0].size(), 6u);
 }
@@ -103,7 +103,7 @@ TEST(CutSignaturesTest, ThetaGraphHasTwoIndependentCutPairs) {
   FilterGraph graph = build_csr_from_edge_list(edges, weights);
   EdgeSignatures sigs = signatures_for(graph);
 
-  std::vector<std::vector<EdgeID>> classes = find_two_edge_cut_classes(graph, sigs);
+  std::vector<std::vector<EdgeID>> classes = find_two_edge_cut_classes(sigs);
   ASSERT_EQ(classes.size(), 3u);
   for (auto& c : classes) EXPECT_EQ(c.size(), 2u);
 }
@@ -132,7 +132,7 @@ TEST(CutSignaturesTest, BridgeIsExcludedButEachTriangleIsItsOwnClass) {
   FilterGraph graph = build_csr_from_edge_list(edges, weights);
   EdgeSignatures sigs = signatures_for(graph);
 
-  std::vector<std::vector<EdgeID>> classes = normalize(find_two_edge_cut_classes(graph, sigs));
+  std::vector<std::vector<EdgeID>> classes = normalize(find_two_edge_cut_classes(sigs));
   ASSERT_EQ(classes.size(), 2u);
   EXPECT_EQ(classes[0].size(), 3u);
   EXPECT_EQ(classes[1].size(), 3u);
