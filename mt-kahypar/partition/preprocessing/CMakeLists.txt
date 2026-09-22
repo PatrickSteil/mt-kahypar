@@ -9,7 +9,8 @@ set(PreprocessingSources
         filtering/tiny_cut_detection.cpp
         filtering/dinic_max_flow.cpp
         filtering/natural_cut_detection.cpp
-        filtering/fragment_assembly.cpp)
+        filtering/fragment_assembly.cpp
+        filtering/filtering_pipeline.cpp)
 
 target_sources(MtKaHyPar-Sources INTERFACE ${PreprocessingSources})
 target_sources(MtKaHyPar-ToolsSources INTERFACE ${PreprocessingSources})
