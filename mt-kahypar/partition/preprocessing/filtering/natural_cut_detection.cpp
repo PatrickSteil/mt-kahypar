@@ -1,6 +1,7 @@
 // mt-kahypar/partition/preprocessing/filtering/natural_cut_detection.cpp
 #include "mt-kahypar/partition/preprocessing/filtering/natural_cut_detection.h"
 
+#include <algorithm>
 #include <cassert>
 
 namespace mt_kahypar {
@@ -123,6 +124,28 @@ std::vector<EdgeID> compute_natural_cut(const FilterGraph& graph, NodeID seed,
     }
   }
   return cut_edges;
+}
+
+std::vector<char> run_natural_cut_detection_sequential(const FilterGraph& graph,
+                                                        const NaturalCutParams& params,
+                                                        std::mt19937_64& rng) {
+  const size_t n = graph.numNodes();
+  std::vector<char> keep(graph.numEdges(), 0);
+  NaturalCutScratch scratch;
+
+  std::vector<NodeID> order(n);
+  for (size_t v = 0; v < n; ++v) order[v] = static_cast<NodeID>(v);
+
+  for (int sweep = 0; sweep < params.coverage; ++sweep) {
+    std::vector<char> covered(n, 0);
+    std::shuffle(order.begin(), order.end(), rng);
+    for (NodeID v : order) {
+      if (covered[v]) continue;
+      std::vector<EdgeID> cut = compute_natural_cut(graph, v, params, scratch, covered);
+      for (EdgeID e : cut) keep[e] = 1;
+    }
+  }
+  return keep;
 }
 
 }  // namespace filtering

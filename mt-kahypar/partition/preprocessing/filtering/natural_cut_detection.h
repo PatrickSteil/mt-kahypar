@@ -1,6 +1,7 @@
 // mt-kahypar/partition/preprocessing/filtering/natural_cut_detection.h
 #pragma once
 
+#include <random>
 #include <vector>
 
 #include "mt-kahypar/partition/preprocessing/filtering/dinic_max_flow.h"
@@ -37,6 +38,15 @@ std::vector<EdgeID> compute_natural_cut(const FilterGraph& graph, NodeID seed,
                                          const NaturalCutParams& params,
                                          NaturalCutScratch& scratch,
                                          std::vector<char>& covered);
+
+// Runs the full sequential natural-cut detection procedure (design spec
+// section 5): for each of params.coverage sweeps, resets per-sweep coverage,
+// visits vertices in a freshly shuffled order, and for every not-yet-covered
+// vertex runs compute_natural_cut as a new seed, accumulating its cut edges
+// into the returned keep set (which persists across all sweeps).
+std::vector<char> run_natural_cut_detection_sequential(const FilterGraph& graph,
+                                                        const NaturalCutParams& params,
+                                                        std::mt19937_64& rng);
 
 }  // namespace filtering
 }  // namespace mt_kahypar

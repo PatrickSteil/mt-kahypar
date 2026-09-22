@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <random>
 
 #include "mt-kahypar/partition/preprocessing/filtering/natural_cut_detection.h"
 
@@ -90,4 +91,33 @@ TEST(ComputeNaturalCutTest, HandlesMultiVertexCoreRingAndBranchingCut) {
   EXPECT_TRUE(covered[3]);
   EXPECT_FALSE(covered[4]);  // ring, not tree
   EXPECT_FALSE(covered[5]);  // ring, not tree
+}
+
+TEST(RunNaturalCutDetectionSequentialTest, WholeSmallGraphAbsorbedYieldsNoCuts) {
+  // A single triangle, U so large the whole component fits inside one BFS
+  // tree: there is no "outside" to cut against, so no edges get kept.
+  std::vector<NodeWeight> weights = {1, 1, 1};
+  std::vector<EdgeListEntry> edges = {{0, 1, 1}, {1, 2, 1}, {0, 2, 1}};
+  FilterGraph graph = build_csr_from_edge_list(edges, weights);
+
+  std::mt19937_64 rng(42);
+  std::vector<char> keep = run_natural_cut_detection_sequential(graph, NaturalCutParams{1000, 1.0, 10.0, 2}, rng);
+  ASSERT_EQ(keep.size(), 3u);
+  for (char k : keep) EXPECT_EQ(k, 0);
+}
+
+TEST(RunNaturalCutDetectionSequentialTest, LongPathKeepsSomeEdges) {
+  // A path much longer than U forces multiple natural cuts along its length.
+  const int len = 40;
+  std::vector<NodeWeight> weights(len, 1);
+  std::vector<EdgeListEntry> edges;
+  for (int i = 0; i + 1 < len; ++i) edges.push_back({static_cast<NodeID>(i), static_cast<NodeID>(i + 1), 1});
+  FilterGraph graph = build_csr_from_edge_list(edges, weights);
+
+  std::mt19937_64 rng(7);
+  std::vector<char> keep = run_natural_cut_detection_sequential(graph, NaturalCutParams{5, 1.0, 10.0, 2}, rng);
+  ASSERT_EQ(keep.size(), static_cast<size_t>(len - 1));
+  bool any_kept = false;
+  for (char k : keep) any_kept = any_kept || k;
+  EXPECT_TRUE(any_kept);
 }
