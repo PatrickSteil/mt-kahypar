@@ -18,7 +18,7 @@
 - Build registration follows the existing pattern: sources are added to the `PreprocessingSources` list in `mt-kahypar/partition/preprocessing/CMakeLists.txt` (no new nested `CMakeLists.txt`, matching how `community_detection/` is wired in) via `target_sources(MtKaHyPar-Sources INTERFACE ...)` and `target_sources(MtKaHyPar-ToolsSources INTERFACE ...)`. Tests are added to `tests/partition/preprocessing/CMakeLists.txt` via `target_sources(mtkahypar_tests PRIVATE ...)`.
 - **Correction from the spec during planning:** spec section 4.2 ("build spanning tree, contract subtree ≤ U top-down") actually requires the **bridge tree** (nodes = 2-edge-connected blocks, edges = bridges), not a spanning tree of the whole graph — a plain spanning tree of a connected graph has no substructure to contract. Task 8 below implements the corrected version. Pass 1 and pass 3 (2-edge-cuts) both need the same spanning-tree-plus-random-XOR-label machinery, factored into a shared `cut_signatures` module (Task 6).
 - **Correction found during pre-flight review (before any task was dispatched):** Task 8's original draft unconditionally merged every vertex of every block into one vertex per block, and translated tau-merges through a separate block-level union-find — both wrong. The first would collapse blocks that were never chosen for contraction (destroying structure later passes need); the second could silently reference an uninitialized representative and crash. Worse, a naive per-merge tau-merge check (`child_subtree + parent's own weight <= U`) allows two *separate* small children of the same parent to each individually pass the check while their *combined* weight, once both are merged into that parent, exceeds `U` — a real violation of the hard `U`-invariant that Task 17's `filtering_invariant_test.cc` exists specifically to catch. Task 8's implementation below is the corrected version: block representatives are computed unconditionally, vertex-level unions happen directly (no block-level union-find detour), and a `tau_merged_extra_weight` accumulator per parent block prevents the cascading overflow. Task 8's test `TauMergePreventsCascadingOverflow` exercises exactly this case.
-- **Deferred from the spec:** the "two-components-at-a-time" traversal optimization for processing 2-edge-cut classes (spec section 4.4 step 8) is not implemented in this pass. Each class is processed via a direct connected-components-excluding-edges call instead. This is simpler and correct; flagged as a follow-up optimization if profiling on real DIMACS instances shows it's needed (real road networks are expected to produce a small number of 2-cut classes per contraction stage).
+- **Deferred from the spec:** the "two-components-at-a-time" traversal optimization for processing 2-edge-cut classes (spec section 4.4 step 8) is not implemented in this pass. Each class is processed via a direct connected-components-excluding-edges call instead. **Correction from Task 19's real-world validation:** the assumption that "real road networks produce a small number of 2-cut classes" was wrong -- a 264K-vertex DIMACS instance produced ~38,000 classes, and processing them sequentially (as originally written) did not finish in reasonable time at any useful `U`. Rather than implementing the full two-at-a-time algorithm, two smaller fixes were applied post-Task-19: (1) `find_two_edge_cut_classes` no longer verifies each candidate class via its own full graph scan -- it trusts the signature bucketing directly, accepting the same already-documented, negligible 128-bit collision risk the rest of the module already accepts; (2) `contract_two_edge_cuts`'s per-class processing loop is parallelized across classes via TBB, since each class's work is independent and only writes to the already-thread-safe `AtomicUnionFind`. The full two-at-a-time optimization remains a legitimate follow-up if these mitigations still prove insufficient at larger (Europe/full-USA) scale.
 
 ---
 
@@ -1475,8 +1475,8 @@ Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>"
 - Test: `tests/partition/preprocessing/filtering/cut_signatures_test.cc` (append)
 
 **Interfaces:**
-- Consumes: `EdgeSignatures`, `compute_edge_endpoints`, `parallel_connected_components_excluding` (for the local disconnection check).
-- Produces: `find_two_edge_cut_classes(graph, sigs) -> std::vector<std::vector<EdgeID>>` — each inner vector is a verified 2-edge-cut equivalence class (size >= 2), excluding bridges. Matches PUNCH's equivalence relation `P` (spec section 4.4).
+- Consumes: `EdgeSignatures`.
+- Produces: `find_two_edge_cut_classes(sigs) -> std::vector<std::vector<EdgeID>>` — each inner vector is a 2-edge-cut equivalence class (size >= 2), excluding bridges. Matches PUNCH's equivalence relation `P` (spec section 4.4). (Originally took `(graph, sigs)` and verified each class via a per-class graph scan; the `graph` parameter and verification were removed by a post-Task-19 performance fix once real-world validation showed the verification scan didn't scale to real road networks -- see the Global Constraints note. `compute_edge_endpoints`/`parallel_connected_components_excluding` are no longer used by this function.)
 
 - [ ] **Step 1: Write the failing tests (appended to `cut_signatures_test.cc`)**
 
@@ -1502,7 +1502,7 @@ TEST(CutSignaturesTest, CycleGraphIsOneClassOfAllEdges) {
   FilterGraph graph = build_csr_from_edge_list(edges, weights);
   EdgeSignatures sigs = signatures_for(graph);
 
-  std::vector<std::vector<EdgeID>> classes = find_two_edge_cut_classes(graph, sigs);
+  std::vector<std::vector<EdgeID>> classes = find_two_edge_cut_classes(sigs);
   ASSERT_EQ(classes.size(), 1u);
   EXPECT_EQ(classes[0].size(), 6u);
 }
@@ -1524,7 +1524,7 @@ TEST(CutSignaturesTest, ThetaGraphHasTwoIndependentCutPairs) {
   FilterGraph graph = build_csr_from_edge_list(edges, weights);
   EdgeSignatures sigs = signatures_for(graph);
 
-  std::vector<std::vector<EdgeID>> classes = find_two_edge_cut_classes(graph, sigs);
+  std::vector<std::vector<EdgeID>> classes = find_two_edge_cut_classes(sigs);
   ASSERT_EQ(classes.size(), 3u);
   for (auto& c : classes) EXPECT_EQ(c.size(), 2u);
 }
@@ -1553,7 +1553,7 @@ TEST(CutSignaturesTest, BridgeIsExcludedButEachTriangleIsItsOwnClass) {
   FilterGraph graph = build_csr_from_edge_list(edges, weights);
   EdgeSignatures sigs = signatures_for(graph);
 
-  std::vector<std::vector<EdgeID>> classes = normalize(find_two_edge_cut_classes(graph, sigs));
+  std::vector<std::vector<EdgeID>> classes = normalize(find_two_edge_cut_classes(sigs));
   ASSERT_EQ(classes.size(), 2u);
   EXPECT_EQ(classes[0].size(), 3u);
   EXPECT_EQ(classes[1].size(), 3u);
@@ -1579,27 +1579,29 @@ Append to `cut_signatures.h` (inside `namespace filtering`):
 // Finds all 2-edge-cut equivalence classes of `graph` (design spec section
 // 4.4): buckets every non-bridge edge by its signature (tree edges by their
 // aggregated label, non-tree edges by their own label -- see
-// compute_edge_signatures), then verifies each candidate class of size >= 2
-// by removing every edge in the class at once and checking that two of its
-// endpoints land in different connected components. This is a sufficient
-// check (not merely a one-pair spot-check): signature equality already
-// implies identical fundamental-cycle coverage sets for every edge in the
-// bucket (up to an astronomically rare 128-bit collision), which by the
-// cographic-matroid argument in the design spec means EVERY pair within a
-// genuine bucket forms a valid 2-cut -- so confirming any single
-// representative pair is disconnected is enough to confirm the whole
-// bucket. Verified classes are returned; unverified (collision) candidates
-// are dropped. Note this deliberately does NOT special-case "the class
-// happens to form a simple cycle" or similar shape-based heuristics: a
-// bucket like a whole triangle's 3 edges (which all share one signature,
-// since the triangle's one chord's fundamental cycle covers both of its
-// tree edges) is a genuine, correct class -- every pair of a triangle's
-// edges is a valid 2-cut, since a triangle's own minimum edge cut is 2, not
-// 3 (see BridgeIsExcludedButEachTriangleIsItsOwnClass in the test file,
-// which replaced an earlier, incorrect "no classes at all" expectation for
-// exactly this shape).
-std::vector<std::vector<EdgeID>> find_two_edge_cut_classes(const FilterGraph& graph,
-                                                            const EdgeSignatures& sigs);
+// compute_edge_signatures). A bucket of size >= 2 is returned as a class
+// directly, with NO per-class verification scan (see the "Deferred from
+// the spec" / real-world-validation note in this plan's Global Constraints
+// for why: Task 19's validation against real DIMACS road networks found
+// that a real instance (264K vertices) produces tens of thousands of
+// candidate buckets, and verifying each one via a full O(n+m) graph scan
+// -- as an earlier version of this function did -- took minutes even on
+// the smallest test instance, independent of U, with no run at a useful U
+// finishing in reasonable time. Signature equality already implies
+// identical fundamental-cycle coverage sets for every edge in the bucket,
+// up to an astronomically rare 128-bit collision (per the cographic-
+// matroid argument in the design spec): trusting the bucket directly
+// accepts exactly that already-documented, negligible Monte Carlo risk,
+// consistent with how the rest of this module already treats the 128-bit
+// collision probability as negligible. Note this deliberately does NOT
+// special-case "the class happens to form a simple cycle" or similar
+// shape-based heuristics: a bucket like a whole triangle's 3 edges (which
+// all share one signature, since the triangle's one chord's fundamental
+// cycle covers both of its tree edges) is a genuine, correct class --
+// every pair of a triangle's edges is a valid 2-cut, since a triangle's
+// own minimum edge cut is 2, not 3 (see
+// BridgeIsExcludedButEachTriangleIsItsOwnClass in the test file).
+std::vector<std::vector<EdgeID>> find_two_edge_cut_classes(const EdgeSignatures& sigs);
 ```
 
 - [ ] **Step 4: Write the implementation**
@@ -1608,8 +1610,6 @@ Append to `cut_signatures.cpp`:
 
 ```cpp
 #include <unordered_map>
-
-#include "mt-kahypar/partition/preprocessing/filtering/parallel_connectivity.h"
 
 namespace mt_kahypar {
 namespace filtering {
@@ -1622,26 +1622,11 @@ struct SignatureHash {
     return std::hash<uint64_t>()(hi) ^ (std::hash<uint64_t>()(lo) * 0x9e3779b97f4a7c15ULL);
   }
 };
-
-// A class is verified if removing all its edges actually disconnects at
-// least one pair of its incident vertices from each other. Cheap at road-
-// network scale since classes are small (size 2 in the overwhelming common
-// case) and this check runs once per candidate class, not per edge.
-bool verify_class_disconnects(const FilterGraph& graph, const std::vector<EdgeID>& cls) {
-  std::vector<char> excluded(graph.numEdges(), 0);
-  for (EdgeID e : cls) excluded[e] = 1;
-  std::vector<NodeID> component = parallel_connected_components_excluding(graph, excluded);
-  auto endpoints = compute_edge_endpoints(graph);
-  const NodeID u = endpoints[cls[0]].first;
-  const NodeID v = endpoints[cls[0]].second;
-  return component[u] != component[v];
-}
 }  // namespace
 
-std::vector<std::vector<EdgeID>> find_two_edge_cut_classes(const FilterGraph& graph,
-                                                            const EdgeSignatures& sigs) {
+std::vector<std::vector<EdgeID>> find_two_edge_cut_classes(const EdgeSignatures& sigs) {
   std::unordered_map<unsigned __int128, std::vector<EdgeID>, SignatureHash> buckets;
-  for (EdgeID e = 0; e < static_cast<EdgeID>(graph.numEdges()); ++e) {
+  for (EdgeID e = 0; e < static_cast<EdgeID>(sigs.signature.size()); ++e) {
     const bool is_bridge = sigs.is_tree_edge[e] && sigs.signature[e] == 0;
     if (is_bridge) continue;
     buckets[sigs.signature[e]].push_back(e);
@@ -1650,7 +1635,7 @@ std::vector<std::vector<EdgeID>> find_two_edge_cut_classes(const FilterGraph& gr
   std::vector<std::vector<EdgeID>> classes;
   for (auto& [signature, edges] : buckets) {
     if (edges.size() < 2) continue;
-    if (verify_class_disconnects(graph, edges)) classes.push_back(std::move(edges));
+    classes.push_back(std::move(edges));
   }
   return classes;
 }
@@ -2247,6 +2232,48 @@ TEST(ContractTwoEdgeCutsTest, LeavesHeavySideUncontracted) {
   EXPECT_NE(result.mapping[0], result.mapping[1]);
   EXPECT_EQ(result.mapping[2], result.mapping[3]);
 }
+
+TEST(ContractTwoEdgeCutsTest, ManyIndependentClassesProcessInParallelCorrectly) {
+  // A "star of double-bridges": a heavy central hub C (vertex 0, weight
+  // 100 -- always too heavy to contract with anything) with num_units
+  // satellite (hub_i, leaf_i) pairs, each connected to C via its OWN pair
+  // of parallel edges (its own independent 2-edge-cut class) plus a
+  // hub_i-leaf_i bridge. Deliberately NOT a chain of double-bridges: a
+  // chain would make each cut isolate a GROWING prefix of the chain
+  // (nesting classes' effects together), which stops being independent
+  // once the prefix exceeds U -- exactly the kind of test-design mistake
+  // this plan has hit before (see the design comment on make_double_bridge
+  // above). A star keeps every class's "small side" to exactly one
+  // {hub_i, leaf_i} pair (weight 2 <= U = 5), regardless of how many other
+  // units exist, so this genuinely exercises `num_units` independent
+  // classes processed in parallel by one contract_two_edge_cuts call --
+  // regression-testing the fix for Task 19's real-world-validation finding
+  // that this loop needed to be parallelized.
+  const int num_units = 50;
+  std::vector<NodeWeight> weights = {100};  // vertex 0 = C
+  std::vector<EdgeListEntry> edges;
+  for (int i = 0; i < num_units; ++i) {
+    const NodeID hub = static_cast<NodeID>(1 + 2 * i);
+    const NodeID leaf = static_cast<NodeID>(2 + 2 * i);
+    weights.push_back(1);  // hub
+    weights.push_back(1);  // leaf
+    edges.push_back({hub, leaf, 1});      // bridge
+    edges.push_back({NodeID(0), hub, 1}); // parallel edge 1 to C
+    edges.push_back({NodeID(0), hub, 1}); // parallel edge 2 to C
+  }
+  FilterGraph graph = build_csr_from_edge_list(edges, weights);
+
+  ContractionResult result = contract_two_edge_cuts(graph, 5);
+
+  for (int i = 0; i < num_units; ++i) {
+    const NodeID hub = static_cast<NodeID>(1 + 2 * i);
+    const NodeID leaf = static_cast<NodeID>(2 + 2 * i);
+    EXPECT_EQ(result.mapping[hub], result.mapping[leaf]) << "unit " << i;
+    EXPECT_NE(result.mapping[hub], result.mapping[0]) << "unit " << i << " vs center";
+  }
+  // Every unit contracts to its own vertex, plus C stays on its own.
+  EXPECT_EQ(result.graph.numNodes(), static_cast<size_t>(num_units + 1));
+}
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
@@ -2261,13 +2288,17 @@ Append to `tiny_cut_detection.h`:
 ```cpp
 // Part 1, pass 3 (design spec section 4.4): finds 2-edge-cut equivalence
 // classes and, for each class S, contracts every connected component of
-// (V, E \ S) whose total weight is <= U.
+// (V, E \ S) whose total weight is <= U. Classes are processed in
+// parallel (see the implementation comment) -- real road-network graphs
+// can produce tens of thousands of classes (Task 19's DIMACS validation
+// found ~38K on a 264K-vertex instance), each requiring an O(n+m) graph
+// scan, which does not finish in reasonable time run sequentially.
 ContractionResult contract_two_edge_cuts(const FilterGraph& graph, NodeWeight U);
 ```
 
 - [ ] **Step 4: Write the implementation**
 
-Append to `tiny_cut_detection.cpp`:
+Append to `tiny_cut_detection.cpp` (add `#include <tbb/parallel_for.h>` to its includes if not already present):
 
 ```cpp
 ContractionResult contract_two_edge_cuts(const FilterGraph& graph, NodeWeight U) {
@@ -2275,10 +2306,25 @@ ContractionResult contract_two_edge_cuts(const FilterGraph& graph, NodeWeight U)
   std::vector<NodeID> component = parallel_connected_components(graph);
   SpanningForest forest = build_spanning_forest(graph, component, {});
   EdgeSignatures sigs = compute_edge_signatures(graph, forest);
-  std::vector<std::vector<EdgeID>> classes = find_two_edge_cut_classes(graph, sigs);
+  std::vector<std::vector<EdgeID>> classes = find_two_edge_cut_classes(sigs);
 
   AtomicUnionFind uf(n);
-  for (const std::vector<EdgeID>& cls : classes) {
+  // Each class's processing (compute components of G minus the class's
+  // edges, then union any component with weight <= U) reads only shared
+  // IMMUTABLE state (`graph`, `classes`) and writes only to `uf`, whose
+  // unite() is already safe under concurrent calls from multiple threads
+  // (see union_find.h) -- so classes can be processed fully in parallel.
+  // This was added as a direct fix for a real-world-validation finding
+  // (Task 19): sequentially, this loop did not finish in reasonable time
+  // on real DIMACS road networks, independent of U, since a real instance
+  // can produce far more classes than any synthetic test graph did. This
+  // still does not implement the paper's "two-at-a-time" bounded-traversal
+  // optimization (design spec section 4.4 step 8, deferred per this plan's
+  // Global Constraints) -- it parallelizes the existing per-class full-
+  // graph-scan approach rather than replacing it with an asymptotically
+  // better one, which was judged sufficient for this pass.
+  tbb::parallel_for(size_t(0), classes.size(), [&](size_t i) {
+    const std::vector<EdgeID>& cls = classes[i];
     std::vector<char> excluded(graph.numEdges(), 0);
     for (EdgeID e : cls) excluded[e] = 1;
     std::vector<NodeID> comp = parallel_connected_components_excluding(graph, excluded);
@@ -2289,7 +2335,7 @@ ContractionResult contract_two_edge_cuts(const FilterGraph& graph, NodeWeight U)
     for (size_t v = 0; v < n; ++v) {
       if (comp_weight[comp[v]] <= U) uf.unite(static_cast<NodeID>(v), comp[v]);
     }
-  }
+  });
   return contract_graph(graph, uf);
 }
 ```
@@ -2297,7 +2343,7 @@ ContractionResult contract_two_edge_cuts(const FilterGraph& graph, NodeWeight U)
 - [ ] **Step 5: Build and run**
 
 Run: `cmake --build build --target mtkahypar_tests -j$(nproc) && ./build/tests/mtkahypar_tests --gtest_filter=ContractTwoEdgeCutsTest.*`
-Expected: PASS (2 tests)
+Expected: PASS (3 tests)
 
 - [ ] **Step 6: Commit**
 
