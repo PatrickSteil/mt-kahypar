@@ -1,6 +1,8 @@
 // mt-kahypar/partition/preprocessing/filtering/natural_cut_detection.cpp
 #include "mt-kahypar/partition/preprocessing/filtering/natural_cut_detection.h"
 
+#include <cassert>
+
 namespace mt_kahypar {
 namespace filtering {
 
@@ -99,8 +101,14 @@ std::vector<EdgeID> compute_natural_cut(const FilterGraph& graph, NodeID seed,
     for (EdgeID pos = graph.node_begin[u]; pos < graph.node_begin[u + 1]; ++pos) {
       const NodeID v = graph.adj[pos];
       if (local_id[v] == kInvalidNode || local_id[v] == 1) continue;  // outside net, or ring-ring
-      if (scratch.in_tree[v]) continue;  // handled from the tree side above
-      add_local_edge(local_id[u], local_id[v], graph.adj_edge[pos], graph.edge_weight[graph.adj_edge[pos]]);
+      // Every remaining v has a valid, non-ring local_id, which by
+      // construction (local_id is assigned only to tree or ring vertices)
+      // means v must be a tree vertex -- and every tree-to-ring edge is
+      // already added from the tree-side loop above. This branch is
+      // therefore structurally unreachable; the assertion documents that
+      // invariant so a future edit to the tree-side loop that breaks it is
+      // caught immediately instead of silently dropping an edge.
+      assert(scratch.in_tree[v] && "ring-loop should never reach a non-tree, non-ring, non-excluded vertex");
     }
   }
 

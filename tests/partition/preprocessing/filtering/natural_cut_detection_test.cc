@@ -1,5 +1,7 @@
 #include <gtest/gtest.h>
 
+#include <algorithm>
+
 #include "mt-kahypar/partition/preprocessing/filtering/natural_cut_detection.h"
 
 using namespace mt_kahypar::filtering;
@@ -30,4 +32,62 @@ TEST(ComputeNaturalCutTest, FindsTheOnlyPossibleCutOnAUnitPath) {
   EXPECT_TRUE(covered[2]);
   EXPECT_FALSE(covered[3]);  // ring, not tree -- not marked covered
   EXPECT_FALSE(covered[4]);  // never visited
+}
+
+TEST(ComputeNaturalCutTest, HandlesMultiVertexCoreRingAndBranchingCut) {
+  // Edges (insertion order = canonical edge id): e0=(0,1), e1=(1,2), e2=(1,3),
+  // e3=(2,4), e4=(3,4), e5=(3,5). Node weights: 0,1 = 2 each; 2,3 = 1 each;
+  // 4,5 = 1 each (ring weights are never summed into tree_size/target
+  // thresholds, so their exact value doesn't matter here).
+  //
+  // With U=6, alpha=1.0: target_tree_size=6. BFS from seed 0 (adjacency
+  // built in edge-insertion order) visits 1 (via e0), then, from 1's
+  // adjacency [0,2,3], visits 2 (via e1) and 3 (via e2) -- tree={0,1,2,3},
+  // tree_size=2+2+1+1=6, stopping exactly at target. Vertices 4,5 are never
+  // added to the tree (reached only from 2/3, which are only visited once
+  // the tree already hit its target).
+  //
+  // With f=2: target_core_size=6/2=3. Core-selection walks tree_order
+  // [0,1,2,3]: admit 0 (running=2, 2<3 continue), admit 1 (running=4, 4>=3
+  // break) -- core={0,1}, weight 4.
+  //
+  // ring = neighbors of tree{0,1,2,3} outside it: vertex 2's only non-tree
+  // neighbor is 4; vertex 3's non-tree neighbors are 4 (again -- reached
+  // from TWO different tree-interior vertices, exercising the in_ring
+  // dedup) and 5. ring={4,5}.
+  //
+  // Local network: core{0,1}->s, ring{4,5}->t, tree-interior {2,3}->local
+  // ids 2,3. Edges (all added from the tree-side loop; the ring-side loop
+  // is provably unreachable here since every neighbor of a ring vertex with
+  // a valid local_id is necessarily a tree vertex, already handled):
+  //   s-local2 (e1, cap 100), s-local3 (e2, cap 3),
+  //   local2-t (e3, cap 50), local3-t (e4, cap 5), local3-t (e5, cap 5).
+  // Checking all 4 subsets of {local2,local3} reachable from s gives cut
+  // values {s}=103, {s,local2}=53, {s,local3}=110, {s,local2,local3}=60 --
+  // a UNIQUE minimum of 53 at {s,local2}, crossed by e2 (s-local3, cap 3)
+  // and e3 (local2-t, cap 50). Dinic's must find this exact cut regardless
+  // of augmenting-path order, since it's the unique global minimum.
+  std::vector<NodeWeight> weights = {2, 2, 1, 1, 1, 1};
+  std::vector<EdgeListEntry> edges = {
+    {0, 1, 1}, {1, 2, 100}, {1, 3, 3}, {2, 4, 50}, {3, 4, 5}, {3, 5, 5}
+  };
+  FilterGraph graph = build_csr_from_edge_list(edges, weights);
+
+  NaturalCutParams params{6, 1.0, 2.0, 2};
+  NaturalCutScratch scratch;
+  std::vector<char> covered(6, 0);
+
+  std::vector<EdgeID> cut = compute_natural_cut(graph, 0, params, scratch, covered);
+
+  std::sort(cut.begin(), cut.end());
+  ASSERT_EQ(cut.size(), 2u);
+  EXPECT_EQ(cut[0], 2u);  // e2 = (1,3)
+  EXPECT_EQ(cut[1], 3u);  // e3 = (2,4)
+
+  EXPECT_TRUE(covered[0]);
+  EXPECT_TRUE(covered[1]);
+  EXPECT_TRUE(covered[2]);
+  EXPECT_TRUE(covered[3]);
+  EXPECT_FALSE(covered[4]);  // ring, not tree
+  EXPECT_FALSE(covered[5]);  // ring, not tree
 }
