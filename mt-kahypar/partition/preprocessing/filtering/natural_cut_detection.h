@@ -61,7 +61,11 @@ std::vector<char> run_natural_cut_detection_sequential(const FilterGraph& graph,
 // scratch buffers. `keep` flags are set with plain relaxed atomic stores
 // (a monotonic boolean needs no compare-exchange). A short serial mop-up
 // pass handles any vertices left uncovered by races near the scan's end.
-std::vector<char> run_natural_cut_detection(const FilterGraph& graph, const NaturalCutParams& params);
+// When `verbose` is set, prints a running max-flow-solve count (one Dinic
+// solve per compute_natural_cut call) every 5000 solves, plus a per-sweep
+// summary, to stderr.
+std::vector<char> run_natural_cut_detection(const FilterGraph& graph, const NaturalCutParams& params,
+                                             bool verbose = false);
 
 }  // namespace filtering
 }  // namespace mt_kahypar

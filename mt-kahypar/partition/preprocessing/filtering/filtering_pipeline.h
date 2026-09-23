@@ -22,6 +22,10 @@ struct FilteringParams {
   double alpha = 1.0;
   double f = 10.0;
   int coverage = 2;
+  // When set, prints per-phase timing and progress (including a running
+  // count of max-flow solves in natural-cut detection) to stderr as the
+  // pipeline runs. Off by default so callers (e.g. unit tests) stay silent.
+  bool verbose = false;
 };
 
 // Runs the full PUNCH filtering pipeline (Parts 1-3) on `graph`. No fragment

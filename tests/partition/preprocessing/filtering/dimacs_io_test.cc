@@ -36,13 +36,19 @@ TEST(DimacsIoTest, ParsesSimpleGraph) {
     EXPECT_EQ(graph.degree(v), 2u);
     EXPECT_EQ(graph.node_weight[v], 1u);
   }
+  for (EdgeID e = 0; e < graph.numEdges(); ++e) {
+    EXPECT_EQ(graph.edge_weight[e], 1);
+  }
 }
 
-TEST(DimacsIoTest, ThrowsOnInconsistentWeights) {
-  const std::string path = "dimacs_io_test_bad.gr";
+TEST(DimacsIoTest, IgnoresEdgeWeightsEvenWhenInconsistent) {
+  const std::string path = "dimacs_io_test_weights.gr";
   write_file(path, "p sp 2 2\na 1 2 4\na 2 1 5\n");
-  EXPECT_THROW(read_dimacs_graph(path), std::runtime_error);
+  FilterGraph graph = read_dimacs_graph(path);
   std::remove(path.c_str());
+
+  ASSERT_EQ(graph.numEdges(), 1u);
+  EXPECT_EQ(graph.edge_weight[0], 1);
 }
 
 TEST(DimacsIoTest, ThrowsOnMissingFile) {

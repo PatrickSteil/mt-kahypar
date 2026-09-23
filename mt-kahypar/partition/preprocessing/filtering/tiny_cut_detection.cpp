@@ -1,6 +1,8 @@
 // mt-kahypar/partition/preprocessing/filtering/tiny_cut_detection.cpp
 #include "mt-kahypar/partition/preprocessing/filtering/tiny_cut_detection.h"
 
+#include <chrono>
+#include <iostream>
 #include <unordered_map>
 
 #include <tbb/parallel_for.h>
@@ -420,10 +422,22 @@ ContractionResult contract_two_edge_cuts(const FilterGraph& graph, NodeWeight U)
   return contract_graph(graph, uf);
 }
 
-ContractionResult run_tiny_cut_detection(const FilterGraph& graph, const TinyCutParams& params) {
-  ContractionResult r1 = contract_component_tree(graph, params);
-  ContractionResult r2 = contract_degree2_chains(r1.graph, params.U);
-  ContractionResult r3 = contract_two_edge_cuts(r2.graph, params.U);
+ContractionResult run_tiny_cut_detection(const FilterGraph& graph, const TinyCutParams& params,
+                                          bool verbose) {
+  auto run_pass = [&](const char* name, auto&& pass) {
+    const auto start = std::chrono::steady_clock::now();
+    ContractionResult r = pass();
+    if (verbose) {
+      const double seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
+      std::cerr << "[tiny-cut] " << name << ": " << r.graph.numNodes() << " vertices left ("
+                << seconds << "s)\n";
+    }
+    return r;
+  };
+
+  ContractionResult r1 = run_pass("pass 1 (component tree)", [&] { return contract_component_tree(graph, params); });
+  ContractionResult r2 = run_pass("pass 2 (degree-2 chains)", [&] { return contract_degree2_chains(r1.graph, params.U); });
+  ContractionResult r3 = run_pass("pass 3 (two-edge cuts)", [&] { return contract_two_edge_cuts(r2.graph, params.U); });
 
   std::vector<NodeID> composed(graph.numNodes());
   for (size_t v = 0; v < graph.numNodes(); ++v) {

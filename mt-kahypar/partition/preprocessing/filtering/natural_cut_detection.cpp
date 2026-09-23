@@ -2,7 +2,10 @@
 #include "mt-kahypar/partition/preprocessing/filtering/natural_cut_detection.h"
 
 #include <algorithm>
+#include <atomic>
 #include <cassert>
+#include <chrono>
+#include <iostream>
 
 #include <tbb/parallel_for.h>
 
@@ -180,7 +183,8 @@ std::vector<char> run_natural_cut_detection_sequential(const FilterGraph& graph,
   return keep;
 }
 
-std::vector<char> run_natural_cut_detection(const FilterGraph& graph, const NaturalCutParams& params) {
+std::vector<char> run_natural_cut_detection(const FilterGraph& graph, const NaturalCutParams& params,
+                                             bool verbose) {
   const size_t n = graph.numNodes();
   const size_t m = graph.numEdges();
   std::vector<parallel::IntegralAtomicWrapper<uint8_t>> keep(m);
@@ -191,7 +195,20 @@ std::vector<char> run_natural_cut_detection(const FilterGraph& graph, const Natu
   std::vector<NodeID> order(n);
   for (size_t v = 0; v < n; ++v) order[v] = static_cast<NodeID>(v);
 
+  const auto pipeline_start = std::chrono::steady_clock::now();
+  std::atomic<size_t> max_flow_solves{0};
+  constexpr size_t kProgressStride = 5000;
+  auto log_solve = [&] {
+    if (!verbose) return;
+    const size_t count = max_flow_solves.fetch_add(1, std::memory_order_relaxed) + 1;
+    if (count % kProgressStride == 0) {
+      const double seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - pipeline_start).count();
+      std::cerr << "[natural-cut] " << count << " max-flow problems solved (" << seconds << "s elapsed)\n";
+    }
+  };
+
   for (int sweep = 0; sweep < params.coverage; ++sweep) {
+    const auto sweep_start = std::chrono::steady_clock::now();
     std::vector<parallel::IntegralAtomicWrapper<uint8_t>> covered(n);
     for (size_t v = 0; v < n; ++v) covered[v] = 0;
 
@@ -212,6 +229,7 @@ std::vector<char> run_natural_cut_detection(const FilterGraph& graph, const Natu
       for (size_t u = 0; u < n; ++u) covered_snapshot[u] = covered[u].load(std::memory_order_relaxed);
 
       std::vector<EdgeID> cut = compute_natural_cut(graph, v, params, local_scratch, covered_snapshot);
+      log_solve();
 
       for (size_t u = 0; u < n; ++u) {
         if (covered_snapshot[u]) covered[u].store(1, std::memory_order_relaxed);
@@ -228,11 +246,23 @@ std::vector<char> run_natural_cut_detection(const FilterGraph& graph, const Natu
       std::vector<char> covered_snapshot(n, 0);
       for (size_t u = 0; u < n; ++u) covered_snapshot[u] = covered[u].load(std::memory_order_relaxed);
       std::vector<EdgeID> cut = compute_natural_cut(graph, v, params, local_scratch, covered_snapshot);
+      log_solve();
       for (size_t u = 0; u < n; ++u) {
         if (covered_snapshot[u]) covered[u].store(1, std::memory_order_relaxed);
       }
       for (EdgeID e : cut) keep[e].store(1, std::memory_order_relaxed);
     }
+
+    if (verbose) {
+      const double seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - sweep_start).count();
+      std::cerr << "[natural-cut] sweep " << (sweep + 1) << "/" << params.coverage << " done (" << seconds << "s)\n";
+    }
+  }
+
+  if (verbose) {
+    const double seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - pipeline_start).count();
+    std::cerr << "[natural-cut] total: " << max_flow_solves.load(std::memory_order_relaxed)
+               << " max-flow problems solved (" << seconds << "s)\n";
   }
 
   std::vector<char> result(m);

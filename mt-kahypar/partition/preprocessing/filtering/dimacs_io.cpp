@@ -40,7 +40,7 @@ FilterGraph read_dimacs_graph(const std::string& path) {
       }
       size_t u1 = 0, v1 = 0;
       long long w = 0;
-      iss >> u1 >> v1 >> w;
+      iss >> u1 >> v1 >> w;  // w is parsed but ignored -- filtering minimizes border nodes, not cut weight
       if (u1 == 0 || v1 == 0 || u1 > n || v1 > n) {
         throw std::runtime_error("DIMACS arc references an out-of-range node id: " + path);
       }
@@ -48,13 +48,7 @@ FilterGraph read_dimacs_graph(const std::string& path) {
       const NodeID v = static_cast<NodeID>(v1 - 1);
       if (u == v) continue;
       const uint64_t key = undirected_key(u, v);
-      auto it = edges_by_key.find(key);
-      if (it == edges_by_key.end()) {
-        edges_by_key.emplace(key, EdgeListEntry{u, v, static_cast<EdgeWeight>(w)});
-      } else if (it->second.weight != static_cast<EdgeWeight>(w)) {
-        throw std::runtime_error(
-            "DIMACS file has inconsistent weights for the two directions of an undirected edge: " + path);
-      }
+      edges_by_key.emplace(key, EdgeListEntry{u, v, static_cast<EdgeWeight>(1)});
     }
   }
 

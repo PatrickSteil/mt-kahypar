@@ -15,19 +15,21 @@ namespace {
 void print_usage(const char* prog) {
   std::cerr << "Usage: " << prog << " --graph <dimacs.gr> --U <size> "
             << "[--alpha 1.0] [--f 10] [--coverage 2] [--tau 5] "
-            << "[--dump-kept-edges <path>]\n";
+            << "[--dump-kept-edges <path>] [--dump-partition <path>] [--verbose]\n";
 }
 }  // namespace
 
 int main(int argc, char** argv) {
   std::string graph_path;
   std::string dump_path;
+  std::string partition_path;
   NodeWeight U = 0;
   NodeWeight tau = 5;
   double alpha = 1.0;
   double f = 10.0;
   int coverage = 2;
   bool has_U = false;
+  bool verbose = false;
 
   for (int i = 1; i < argc; ++i) {
     const std::string arg = argv[i];
@@ -42,6 +44,8 @@ int main(int argc, char** argv) {
     else if (arg == "--coverage") coverage = std::stoi(next());
     else if (arg == "--tau") tau = std::stoull(next());
     else if (arg == "--dump-kept-edges") dump_path = next();
+    else if (arg == "--dump-partition") partition_path = next();
+    else if (arg == "--verbose") verbose = true;
     else { print_usage(argv[0]); return 1; }
   }
 
@@ -53,8 +57,11 @@ int main(int argc, char** argv) {
   FilterGraph graph = read_dimacs_graph(graph_path);
   std::cout << "Loaded graph: |V| = " << graph.numNodes() << ", |E| = " << graph.numEdges() << "\n";
 
+  FilteringParams params{U, tau, alpha, f, coverage};
+  params.verbose = verbose;
+
   const auto start = std::chrono::steady_clock::now();
-  FilteringResult result = run_filtering_pipeline(graph, FilteringParams{U, tau, alpha, f, coverage});
+  FilteringResult result = run_filtering_pipeline(graph, params);
   const auto end = std::chrono::steady_clock::now();
   const double seconds = std::chrono::duration<double>(end - start).count();
 
@@ -76,6 +83,14 @@ int main(int argc, char** argv) {
     std::ofstream out(dump_path);
     for (const auto& [u, v] : result.kept_edges) out << u << " " << v << "\n";
     std::cout << "Wrote " << result.kept_edges.size() << " kept edges to " << dump_path << "\n";
+  }
+
+  if (!partition_path.empty()) {
+    std::ofstream out(partition_path);
+    for (NodeID fragment : result.fragment_id) out << fragment << "\n";
+    std::cout << "Wrote partition (" << result.fragment_id.size()
+               << " vertices, " << result.fragment_size.size() << " fragments) to "
+               << partition_path << "\n";
   }
 
   return 0;
