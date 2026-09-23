@@ -1439,6 +1439,48 @@ namespace mt_kahypar {
     ImprovePartition(DEFAULT, 4, 0.03, CUT, 3, false);
   }
 
+  TEST_F(APartitioner, ImprovesImbalancedInitialGraphPartition) {
+    SetUpContext(DEFAULT, 4, 0.03, CUT, false);
+    Load(GRAPH_FILE, METIS);
+    const mt_kahypar_hypernode_id_t num_nodes = mt_kahypar_num_hypernodes(hypergraph);
+    std::vector<mt_kahypar_partition_id_t> initial_partition(num_nodes, 0);
+    partitioned_hg = mt_kahypar_create_partitioned_hypergraph(
+      hypergraph, context, 4, initial_partition.data(), &error);
+
+    Context& c = *reinterpret_cast<Context*>(context);
+    c.partition.initial_partition_filename = "initial.part";
+    c.partition.initial_partition_is_kway = true;
+    mt_kahypar_improve_partition(partitioned_hg, context, 1, &error);
+
+    ASSERT_LE(mt_kahypar_imbalance(partitioned_hg, context), 0.03);
+    ASSERT_LT(mt_kahypar_cut(partitioned_hg), mt_kahypar_num_hyperedges(hypergraph));
+  }
+
+  TEST_F(APartitioner, PartitionsGraphStartingFromFragments) {
+    // Compute 256 fragments that restrict coarsening of the 4-way partitioning
+    Partition(GRAPH_FILE, METIS, DEFAULT, 256, 0.03, CUT, false);
+    const mt_kahypar_hypernode_id_t num_nodes = mt_kahypar_num_hypernodes(hypergraph);
+    std::vector<mt_kahypar_partition_id_t> fragments(num_nodes);
+    mt_kahypar_get_partition(partitioned_hg, fragments.data());
+    mt_kahypar_free_partitioned_hypergraph(partitioned_hg);
+    partitioned_hg = mt_kahypar_create_partitioned_hypergraph(
+      hypergraph, context, 256, fragments.data(), &error);
+
+    mt_kahypar_set_partitioning_parameters(context, 4, 0.03, CUT);
+    Context& c = *reinterpret_cast<Context*>(context);
+    c.partition.initial_partition_filename = "fragments.part";
+    c.partition.initial_partition_is_kway = false;
+    mt_kahypar_improve_partition(partitioned_hg, context, 1, &error);
+
+    ASSERT_LE(mt_kahypar_imbalance(partitioned_hg, context), 0.03);
+    std::vector<mt_kahypar_partition_id_t> partition(num_nodes);
+    mt_kahypar_get_partition(partitioned_hg, partition.data());
+    for ( mt_kahypar_hypernode_id_t hn = 0; hn < num_nodes; ++hn ) {
+      ASSERT_GE(partition[hn], 0);
+      ASSERT_LT(partition[hn], 4);
+    }
+  }
+
   TEST_F(APartitioner, PartitionsHypergraphWithIndividualBlockWeightsAndVCycle) {
     // Setup Individual Block Weights
     SetUpContext(DEFAULT, 4, 0.03, KM1, false);

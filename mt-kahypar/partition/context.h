@@ -75,6 +75,10 @@ struct PartitioningParameters {
 
   std::string graph_filename { };
   std::string fixed_vertex_filename { };
+  // ! Optional starting point for partitioning: either a k-way partition
+  // ! (all IDs < k) or a fine-grained clustering (e.g., PUNCH fragments)
+  std::string initial_partition_filename { };
+  bool initial_partition_is_kway = true;
   std::string graph_partition_output_folder {};
   std::string graph_partition_filename { };
   std::string graph_community_filename { };

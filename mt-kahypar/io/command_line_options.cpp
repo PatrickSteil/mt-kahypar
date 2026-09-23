@@ -244,6 +244,14 @@ namespace mt_kahypar {
       "Fixed vertex file: allows to pre-assign vertices to a block."
     )->check(CLI::ExistingFile);
     app.add_option(
+      "--initial-partition",
+      context.partition.initial_partition_filename,
+      "Initial partition file (one block/fragment ID per line) used as starting point.\n"
+      "If all IDs are < k, it is used as initial solution on the coarsest level (can be imbalanced).\n"
+      "Otherwise, the IDs are treated as fragments: coarsening only contracts nodes within the\n"
+      "same fragment and initial partitioning computes a k-way partition of the coarsest graph."
+    )->check(CLI::ExistingFile);
+    app.add_option(
       "--part-weights",
       context.partition.max_part_weights,
       "Use the specified individual part weights instead of epsilon."

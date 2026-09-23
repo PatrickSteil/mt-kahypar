@@ -264,10 +264,15 @@ void Multilevel<TypeTraits>::partitionVCycle(Hypergraph& hypergraph,
       hypergraph.setCommunityID(hn, partitioned_hg.partID(hn));
     });
 
-    // Perform V-cycle
+    // Perform V-cycle. If the first cycle starts from a fragment clustering
+    // (IDs >= k) instead of a k-way partition, the fragments only restrict
+    // coarsening and we compute an initial partition of the coarsest hypergraph.
+    const bool use_input_as_initial_solution = i > 0 ||
+      context.partition.initial_partition_filename.empty() ||
+      context.partition.initial_partition_is_kway;
     io::printVCycleBanner(context, i + 1);
     partitioned_hg = multilevel_partitioning<TypeTraits>(
-      hypergraph, context, target_graph, true /* V-cycle flag */ );
+      hypergraph, context, target_graph, use_input_as_initial_solution /* V-cycle flag */ );
   }
 }
 
