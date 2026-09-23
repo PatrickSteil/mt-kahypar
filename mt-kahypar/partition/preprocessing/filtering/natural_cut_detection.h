@@ -20,11 +20,21 @@ struct NaturalCutParams {
 // Scratch buffers reused across many BFS-growth + local-min-cut calls, to
 // avoid per-call heap allocation (design spec section 5). One instance per
 // thread when parallelized (Task 15).
+// Per-thread buffers reused across compute_natural_cut calls. The O(n) arrays
+// (in_tree, in_core, in_ring, local_id) are only allocated once per graph size:
+// each call resets exactly the entries touched by the previous call (tree_order
+// and ring), since a natural-cut subproblem only touches O(alpha * U) vertices
+// while there can be hundreds of thousands of subproblems on large graphs.
 struct NaturalCutScratch {
   std::vector<NodeID> bfs_queue;
   std::vector<char> in_tree;
   std::vector<char> in_core;
   std::vector<NodeID> tree_order;
+  std::vector<char> in_ring;
+  std::vector<NodeID> ring;
+  std::vector<NodeID> local_id;
+  // Used by run_natural_cut_detection as the `covered` output of a single call
+  std::vector<char> covered_buffer;
 };
 
 // Grows a BFS tree from `seed` until its total vertex weight reaches

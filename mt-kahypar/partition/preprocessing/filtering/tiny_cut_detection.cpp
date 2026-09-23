@@ -224,8 +224,21 @@ BoundedComponentsResult compute_bounded_components_excluding(
     return false;
   };
 
-  std::vector<NodeID> owner(n, kInvalidNode);  // which seed-group first claimed v
+  // Which seed-group first claimed v. Allocating (and initializing) an O(n) array per
+  // class would dominate the running time, since there can be hundreds of thousands of
+  // classes that each only visit a few vertices. Instead, each thread reuses one array,
+  // which is kInvalidNode everywhere between calls: we reset exactly the claimed
+  // vertices (all_visited) on return.
+  static thread_local std::vector<NodeID> owner;
+  if (owner.size() < n) owner.assign(n, kInvalidNode);
   std::vector<NodeID> all_visited;             // every claimed vertex, for final bucketing
+  struct ResetOwner {
+    std::vector<NodeID>& owner;
+    const std::vector<NodeID>& visited;
+    ~ResetOwner() {
+      for (NodeID v : visited) owner[v] = kInvalidNode;
+    }
+  } reset_owner{owner, all_visited};
   std::vector<std::vector<NodeID>> queue;      // per seed-group BFS queue
   std::vector<size_t> cursor;                  // per seed-group read cursor into `queue`
   std::vector<NodeWeight> group_weight;
