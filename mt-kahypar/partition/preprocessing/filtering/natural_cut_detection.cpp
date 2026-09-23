@@ -15,10 +15,16 @@
 namespace mt_kahypar {
 namespace filtering {
 
-std::vector<EdgeID> compute_natural_cut(const FilterGraph& graph, NodeID seed,
-                                         const NaturalCutParams& params,
-                                         NaturalCutScratch& scratch,
-                                         std::vector<char>& covered) {
+namespace {
+// Shared implementation of compute_natural_cut. `mark_covered(v)` is invoked
+// for every core vertex as soon as the core is fixed -- before the (possibly
+// long) flow computation -- so that concurrent callers see those vertices as
+// covered immediately and do not pick them as redundant seeds.
+template <typename MarkCovered>
+std::vector<EdgeID> compute_natural_cut_impl(const FilterGraph& graph, NodeID seed,
+                                             const NaturalCutParams& params,
+                                             NaturalCutScratch& scratch,
+                                             MarkCovered&& mark_covered) {
   const size_t n = graph.numNodes();
   if (scratch.in_tree.size() != n) {
     scratch.in_tree.assign(n, 0);
@@ -104,7 +110,7 @@ std::vector<EdgeID> compute_natural_cut(const FilterGraph& graph, NodeID seed,
   NodeWeight running = 0;
   for (NodeID v : scratch.tree_order) {
     scratch.in_core[v] = 1;
-    covered[v] = 1;
+    mark_covered(v);
     running += graph.node_weight[v];
     if (running >= target_core_size) break;
   }
@@ -129,52 +135,46 @@ std::vector<EdgeID> compute_natural_cut(const FilterGraph& graph, NodeID seed,
   }
   for (NodeID v : ring) local_id[v] = 1;
 
-  FlowNetwork network(next_local_id);
+  FlowNetwork& network = scratch.network;
+  network.reset(next_local_id);
   network.source = 0;
   network.sink = 1;
-  std::vector<std::vector<EdgeID>> local_arc_to_original(next_local_id);
 
-  auto add_local_edge = [&](NodeID lu, NodeID lv, EdgeID original_edge, EdgeWeight weight) {
-    if (lu == lv) return;  // both endpoints collapsed to the same local node
-    network.add_edge(lu, lv, weight);
-    local_arc_to_original[lu].push_back(original_edge);
-    local_arc_to_original[lv].push_back(original_edge);
-  };
-
+  // Every neighbor of a tree vertex is itself a tree or ring vertex, so all
+  // local_id lookups below are valid. Tree-tree edges are added once (from
+  // the endpoint with the larger id), tree-ring edges from the tree side.
   for (NodeID u : scratch.tree_order) {
     for (EdgeID pos = graph.node_begin[u]; pos < graph.node_begin[u + 1]; ++pos) {
       const NodeID v = graph.adj[pos];
-      if (local_id[v] == kInvalidNode) continue;
+      assert(local_id[v] != kInvalidNode);
       if (scratch.in_tree[v] && v <= u) continue;  // dedup tree-tree edges
-      add_local_edge(local_id[u], local_id[v], graph.adj_edge[pos], graph.edge_weight[graph.adj_edge[pos]]);
-    }
-  }
-  for (NodeID u : ring) {
-    for (EdgeID pos = graph.node_begin[u]; pos < graph.node_begin[u + 1]; ++pos) {
-      const NodeID v = graph.adj[pos];
-      if (local_id[v] == kInvalidNode || local_id[v] == 1) continue;  // outside net, or ring-ring
-      // Every remaining v has a valid, non-ring local_id, which by
-      // construction (local_id is assigned only to tree or ring vertices)
-      // means v must be a tree vertex -- and every tree-to-ring edge is
-      // already added from the tree-side loop above. This branch is
-      // therefore structurally unreachable; the assertion documents that
-      // invariant so a future edit to the tree-side loop that breaks it is
-      // caught immediately instead of silently dropping an edge.
-      assert(scratch.in_tree[v] && "ring-loop should never reach a non-tree, non-ring, non-excluded vertex");
+      if (local_id[u] == local_id[v]) continue;    // both endpoints collapsed into s
+      network.add_edge(local_id[u], local_id[v], graph.edge_weight[graph.adj_edge[pos]]);
     }
   }
 
-  dinic_max_flow(network);
-  std::vector<char> reachable = min_cut_reachable_from_source(network);
+  push_relabel_max_flow(network);
+  std::vector<char>& reachable = scratch.reachable;
+  min_cut_reachable_from_source(network, reachable, scratch.flow_queue);
 
+  // The reachable side R is a subset of the tree, so the cut is exactly the
+  // set of original edges leaving a reachable tree vertex.
   std::vector<EdgeID> cut_edges;
-  for (uint32_t lu = 0; lu < network.numNodes(); ++lu) {
-    if (!reachable[lu]) continue;
-    for (size_t i = 0; i < network.adj[lu].size(); ++i) {
-      if (!reachable[network.adj[lu][i].to]) cut_edges.push_back(local_arc_to_original[lu][i]);
+  for (NodeID u : scratch.tree_order) {
+    if (!reachable[local_id[u]]) continue;
+    for (EdgeID pos = graph.node_begin[u]; pos < graph.node_begin[u + 1]; ++pos) {
+      if (!reachable[local_id[graph.adj[pos]]]) cut_edges.push_back(graph.adj_edge[pos]);
     }
   }
   return cut_edges;
+}
+}  // namespace
+
+std::vector<EdgeID> compute_natural_cut(const FilterGraph& graph, NodeID seed,
+                                         const NaturalCutParams& params,
+                                         NaturalCutScratch& scratch,
+                                         std::vector<char>& covered) {
+  return compute_natural_cut_impl(graph, seed, params, scratch, [&](NodeID v) { covered[v] = 1; });
 }
 
 std::vector<char> run_natural_cut_detection_sequential(const FilterGraph& graph,
@@ -199,26 +199,6 @@ std::vector<char> run_natural_cut_detection_sequential(const FilterGraph& graph,
   return keep;
 }
 
-namespace {
-// Runs compute_natural_cut and marks its core vertices in the shared atomic `covered`
-// array. compute_natural_cut only ever sets covered[v] for core vertices (a subset of
-// scratch.tree_order), so we pass a thread-local all-zero buffer and afterwards copy
-// and reset exactly the tree vertices instead of mirroring all n entries.
-std::vector<EdgeID> compute_natural_cut_covering(
-    const FilterGraph& graph, NodeID seed, const NaturalCutParams& params, NaturalCutScratch& scratch,
-    std::vector<parallel::IntegralAtomicWrapper<uint8_t>>& covered) {
-  std::vector<char>& covered_buffer = scratch.covered_buffer;
-  if (covered_buffer.size() != graph.numNodes()) covered_buffer.assign(graph.numNodes(), 0);
-  std::vector<EdgeID> cut = compute_natural_cut(graph, seed, params, scratch, covered_buffer);
-  for (NodeID u : scratch.tree_order) {
-    if (covered_buffer[u]) {
-      covered[u].store(1, std::memory_order_relaxed);
-      covered_buffer[u] = 0;
-    }
-  }
-  return cut;
-}
-}  // namespace
 
 std::vector<char> run_natural_cut_detection(const FilterGraph& graph, const NaturalCutParams& params,
                                              bool verbose) {
@@ -252,24 +232,25 @@ std::vector<char> run_natural_cut_detection(const FilterGraph& graph, const Natu
     std::mt19937_64 shuffle_rng(0x9e3779b97f4a7c15ULL + static_cast<uint64_t>(sweep));
     std::shuffle(order.begin(), order.end(), shuffle_rng);
 
+    auto mark_covered = [&](NodeID u) { covered[u].store(1, std::memory_order_relaxed); };
     tbb::parallel_for(size_t(0), order.size(), [&](size_t i) {
       const NodeID v = order[i];
       uint8_t expected = 0;
       if (!covered[v].compare_exchange_strong(expected, 1)) return;
 
-      NaturalCutScratch& local_scratch = scratch.local();
-      std::vector<EdgeID> cut = compute_natural_cut_covering(graph, v, params, local_scratch, covered);
+      std::vector<EdgeID> cut = compute_natural_cut_impl(graph, v, params, scratch.local(), mark_covered);
       log_solve();
       for (EdgeID e : cut) keep[e].store(1, std::memory_order_relaxed);
     });
 
-    // Mop-up pass: handles any vertex left uncovered by races near the end
-    // of the parallel scan (covered is monotonic, so this terminates).
+    // Safety net only: after the scan every vertex is covered, since each one
+    // was either claimed as a seed or already covered when it was visited
+    // (covered is monotonic). So this is an O(n) check that normally runs no
+    // solves -- it is not a serial tail of the sweep.
     for (NodeID v : order) {
       if (covered[v].load(std::memory_order_relaxed)) continue;
       covered[v].store(1, std::memory_order_relaxed);
-      NaturalCutScratch& local_scratch = scratch.local();
-      std::vector<EdgeID> cut = compute_natural_cut_covering(graph, v, params, local_scratch, covered);
+      std::vector<EdgeID> cut = compute_natural_cut_impl(graph, v, params, scratch.local(), mark_covered);
       log_solve();
       for (EdgeID e : cut) keep[e].store(1, std::memory_order_relaxed);
     }

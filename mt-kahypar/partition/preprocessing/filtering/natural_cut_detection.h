@@ -4,7 +4,7 @@
 #include <random>
 #include <vector>
 
-#include "mt-kahypar/partition/preprocessing/filtering/dinic_max_flow.h"
+#include "mt-kahypar/partition/preprocessing/filtering/local_max_flow.h"
 #include "mt-kahypar/partition/preprocessing/filtering/filter_graph.h"
 
 namespace mt_kahypar {
@@ -33,8 +33,10 @@ struct NaturalCutScratch {
   std::vector<char> in_ring;
   std::vector<NodeID> ring;
   std::vector<NodeID> local_id;
-  // Used by run_natural_cut_detection as the `covered` output of a single call
-  std::vector<char> covered_buffer;
+  // Local flow network and min-cut buffers, reused across calls
+  FlowNetwork network;
+  std::vector<char> reachable;
+  std::vector<uint32_t> flow_queue;
 };
 
 // Grows a BFS tree from `seed` until its total vertex weight reaches
@@ -68,11 +70,12 @@ std::vector<char> run_natural_cut_detection_sequential(const FilterGraph& graph,
 // order is scanned by a TBB parallel_for; each task atomically claims its
 // vertex as a new seed via compare-exchange on a per-vertex `covered` flag
 // (skipping on failure), then runs compute_natural_cut using thread-local
-// scratch buffers. `keep` flags are set with plain relaxed atomic stores
-// (a monotonic boolean needs no compare-exchange). A short serial mop-up
-// pass handles any vertices left uncovered by races near the scan's end.
-// When `verbose` is set, prints a running max-flow-solve count (one Dinic
-// solve per compute_natural_cut call) every 5000 solves, plus a per-sweep
+// scratch buffers. Core vertices are marked covered as soon as the core is
+// fixed, before the flow computation, so concurrent tasks do not pick them
+// as redundant seeds. `keep` flags are set with plain relaxed atomic stores
+// (a monotonic boolean needs no compare-exchange). When `verbose` is set,
+// prints a running max-flow-solve count (one solve per compute_natural_cut
+// call) every 5000 solves, plus a per-sweep
 // summary, to stderr.
 std::vector<char> run_natural_cut_detection(const FilterGraph& graph, const NaturalCutParams& params,
                                              bool verbose = false);
