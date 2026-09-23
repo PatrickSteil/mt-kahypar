@@ -249,8 +249,22 @@ namespace mt_kahypar {
       "Initial partition file (one block/fragment ID per line) used as starting point.\n"
       "If all IDs are < k, it is used as initial solution on the coarsest level (can be imbalanced).\n"
       "Otherwise, the IDs are treated as fragments: coarsening only contracts nodes within the\n"
-      "same fragment and initial partitioning computes a k-way partition of the coarsest graph."
+      "same fragment (until it stalls, see --initial-partition-relax-on-stall) and initial\n"
+      "partitioning computes a k-way partition of the coarsest graph.\n"
+      "The input counts as an additional cycle before the --num-vcycles V-cycles."
     )->check(CLI::ExistingFile);
+    app.add_option(
+      "--initial-partition-relax-on-stall",
+      context.partition.initial_partition_relax_on_stall,
+      "Fragment mode: once coarsening within fragments stalls, continue coarsening without\n"
+      "the fragment restriction (otherwise, it is only lifted for initial partitioning)."
+    )->capture_default_str();
+    app.add_option(
+      "--initial-partition-vcycle-fragments",
+      context.partition.initial_partition_vcycle_fragments,
+      "Fragment mode: subsequent V-cycles also only contract nodes within the same fragment\n"
+      "(and block) until coarsening stalls."
+    )->capture_default_str();
     app.add_option(
       "--part-weights",
       context.partition.max_part_weights,

@@ -79,7 +79,8 @@ namespace {
     typename TypeTraits::Hypergraph& hypergraph,
     const Context& context,
     const TargetGraph* target_graph,
-    const bool is_vcycle) {
+    const bool is_vcycle,
+    const bool relax_communities_on_stall = false) {
     using Hypergraph = typename TypeTraits::Hypergraph;
     using PartitionedHypergraph = typename TypeTraits::PartitionedHypergraph;
     PartitionedHypergraph partitioned_hg;
@@ -90,12 +91,20 @@ namespace {
     const bool nlevel = context.isNLevelPartitioning();
     UncoarseningData<TypeTraits> uncoarseningData(nlevel, hypergraph, context);
 
+    // First cycle starting from input fragments (see --initial-partition and Multilevel::partitionVCycle)
+    const bool fragment_mode = !is_vcycle && context.type == ContextType::main &&
+      !context.partition.initial_partition_filename.empty();
+    // If enabled, input fragments only restrict coarsening until it stalls, i.e., until
+    // (almost) all fragments are contracted. Afterwards, coarsening continues without them.
+    Context coarsening_context(context);
+    coarsening_context.coarsening.relax_communities_on_stall = relax_communities_on_stall;
+
     utils::Timer& timer = utils::Utilities::instance().getTimer(context.utility_id);
     timer.start_timer("coarsening", "Coarsening");
     {
       std::unique_ptr<ICoarsener> coarsener = CoarsenerFactory::getInstance().createObject(
         context.coarsening.algorithm, utils::hypergraph_cast(hypergraph),
-        context, uncoarsening::to_pointer(uncoarseningData));
+        coarsening_context, uncoarsening::to_pointer(uncoarseningData));
       coarsener->coarsen();
 
       if (context.partition.enable_logging) {
@@ -113,6 +122,16 @@ namespace {
     PartitionedHypergraph& phg = uncoarseningData.coarsestPartitionedHypergraph();
 
     if ( !is_vcycle ) {
+      if ( fragment_mode ) {
+        // The input fragments only restrict the top-level coarsening. Initial partitioning
+        // inherits the community IDs (e.g., when extracting blocks in recursive bipartitioning),
+        // so fine-grained fragments would prevent any further coarsening of the bipartitioning
+        // subproblems, which results in poor initial partitions.
+        Hypergraph& coarsest_hg = phg.hypergraph();
+        coarsest_hg.doParallelForAllNodes([&](const HypernodeID hn) {
+          coarsest_hg.setCommunityID(hn, coarsest_hg.communityID(hn) % context.partition.k);
+        });
+      }
       DegreeZeroHypernodeRemover<TypeTraits> degree_zero_hn_remover(context);
       if ( context.initial_partitioning.remove_degree_zero_hns_before_ip ) {
         degree_zero_hn_remover.removeDegreeZeroHypernodes(phg.hypergraph());
@@ -144,7 +163,9 @@ namespace {
       // of the input hypergraph as community IDs
       const Hypergraph& hypergraph = phg.hypergraph();
       phg.doParallelForAllNodes([&](const HypernodeID hn) {
-        const PartitionID part_id = hypergraph.communityID(hn);
+        // Community IDs might additionally encode input fragments as
+        // fragment * k + block (see Multilevel::partitionVCycle)
+        const PartitionID part_id = hypergraph.communityID(hn) % context.partition.k;
         ASSERT(part_id != kInvalidPartition && part_id < context.partition.k);
         ASSERT(phg.partID(hn) == kInvalidPartition);
         phg.setOnlyNodePart(hn, part_id);
@@ -244,7 +265,25 @@ void Multilevel<TypeTraits>::partitionVCycle(Hypergraph& hypergraph,
                                              const TargetGraph* target_graph) {
   ASSERT(context.partition.num_vcycles > 0);
 
+  // Fragment mode (see --initial-partition): the input is a fine-grained clustering with
+  // more than k clusters. The fragments restrict coarsening of the first cycle and, if
+  // enabled, of the subsequent V-cycles. To this end, community IDs store
+  // fragment * k + block and coarsening relaxes them to block (i.e., % k) once it stalls.
+  const PartitionID k = context.partition.k;
+  const bool fragment_mode = context.type == ContextType::main &&
+    !context.partition.initial_partition_filename.empty() &&
+    !context.partition.initial_partition_is_kway;
+  vec<PartitionID> fragments;
+  if ( fragment_mode ) {
+    fragments.resize(hypergraph.initialNumNodes());
+    partitioned_hg.doParallelForAllNodes([&](const HypernodeID& hn) {
+      fragments[hn] = partitioned_hg.partID(hn);
+    });
+  }
+
   for ( size_t i = 0; i < context.partition.num_vcycles; ++i ) {
+    const bool use_fragments = fragment_mode &&
+      (i == 0 || context.partition.initial_partition_vcycle_fragments);
     // Reset memory pool
     hypergraph.reset();
     parallel::MemoryPool::instance().reset();
@@ -261,18 +300,22 @@ void Multilevel<TypeTraits>::partitionVCycle(Hypergraph& hypergraph,
     // of the input partition. For initial partitioning, we use the community IDs of
     // smallest hypergraph as initial partition.
     hypergraph.doParallelForAllNodes([&](const HypernodeID& hn) {
-      hypergraph.setCommunityID(hn, partitioned_hg.partID(hn));
+      if ( use_fragments ) {
+        const PartitionID block = i == 0 ? 0 : partitioned_hg.partID(hn);
+        hypergraph.setCommunityID(hn, fragments[hn] * k + block);
+      } else {
+        hypergraph.setCommunityID(hn, partitioned_hg.partID(hn));
+      }
     });
 
     // Perform V-cycle. If the first cycle starts from a fragment clustering
     // (IDs >= k) instead of a k-way partition, the fragments only restrict
     // coarsening and we compute an initial partition of the coarsest hypergraph.
-    const bool use_input_as_initial_solution = i > 0 ||
-      context.partition.initial_partition_filename.empty() ||
-      context.partition.initial_partition_is_kway;
+    const bool use_input_as_initial_solution = i > 0 || !fragment_mode;
     io::printVCycleBanner(context, i + 1);
     partitioned_hg = multilevel_partitioning<TypeTraits>(
-      hypergraph, context, target_graph, use_input_as_initial_solution /* V-cycle flag */ );
+      hypergraph, context, target_graph, use_input_as_initial_solution /* V-cycle flag */,
+      use_fragments && context.partition.initial_partition_relax_on_stall);
   }
 }
 

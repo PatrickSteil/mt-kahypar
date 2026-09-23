@@ -221,6 +221,18 @@ class MultilevelCoarsener : public ICoarsener,
     _uncoarseningData.finalizeCoarsening();
   }
 
+  bool relaxCommunitiesImpl() override {
+    if ( !_context.coarsening.relax_communities_on_stall || _communities_relaxed ) {
+      return false;
+    }
+    Hypergraph& current_hg = Base::currentHypergraph();
+    current_hg.doParallelForAllNodes([&](const HypernodeID hn) {
+      current_hg.setCommunityID(hn, current_hg.communityID(hn) % _context.partition.k);
+    });
+    _communities_relaxed = true;
+    return true;
+  }
+
   HypernodeID currentNumberOfNodesImpl() const override {
     return Base::currentNumNodes();
   }
@@ -259,6 +271,7 @@ class MultilevelCoarsener : public ICoarsener,
   HypernodeID _initial_num_nodes;
   parallel::scalable_vector<HypernodeID> _current_vertices;
   int _pass_nr;
+  bool _communities_relaxed = false;
   utils::ProgressBar _progress_bar;
   bool _enable_randomization;
 };

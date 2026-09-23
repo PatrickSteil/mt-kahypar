@@ -54,6 +54,10 @@ class ICoarsener {
     // not be significantly reduced within one coarsening pass (should_continue).
     while ( shouldNotTerminate() && should_continue ) {
       should_continue = coarseningPass();
+      if ( !should_continue ) {
+        // Coarsening stalled: optionally lift the community restriction once and continue
+        should_continue = relaxCommunities();
+      }
     }
     terminate();
   }
@@ -72,6 +76,13 @@ class ICoarsener {
 
   void terminate() {
     terminateImpl();
+  }
+
+  // ! If enabled (context.coarsening.relax_communities_on_stall), relaxes the community
+  // ! IDs of the current hypergraph from fragment * k + block to block (i.e., % k).
+  // ! Returns true if the communities were relaxed, i.e., coarsening should continue.
+  bool relaxCommunities() {
+    return relaxCommunitiesImpl();
   }
 
   HypernodeID currentNumberOfNodes() const {
@@ -96,6 +107,7 @@ class ICoarsener {
   virtual bool shouldNotTerminateImpl() const = 0;
   virtual bool coarseningPassImpl() = 0;
   virtual void terminateImpl() = 0;
+  virtual bool relaxCommunitiesImpl() { return false; }
   virtual HypernodeID currentNumberOfNodesImpl() const = 0;
   virtual mt_kahypar_hypergraph_t coarsestHypergraphImpl() = 0;
   virtual mt_kahypar_partitioned_hypergraph_t coarsestPartitionedHypergraphImpl() = 0;

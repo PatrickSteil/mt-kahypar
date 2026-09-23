@@ -52,6 +52,12 @@ namespace mt_kahypar {
     if ( params.initial_partition_filename != "" ) {
       str << "  Initial Partition File:             " << params.initial_partition_filename
           << (params.initial_partition_is_kway ? " (k-way)" : " (fragments)") << std::endl;
+      if ( !params.initial_partition_is_kway ) {
+        str << "  Relax Fragments On Stall:           " << std::boolalpha
+            << params.initial_partition_relax_on_stall << std::endl;
+        str << "  Use Fragments In V-Cycles:          " << std::boolalpha
+            << params.initial_partition_vcycle_fragments << std::endl;
+      }
     }
     if ( params.write_partition_file ) {
       str << "  Partition File:                     " << params.graph_partition_filename << std::endl;

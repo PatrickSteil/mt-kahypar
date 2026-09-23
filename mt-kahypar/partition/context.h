@@ -79,6 +79,11 @@ struct PartitioningParameters {
   // ! (all IDs < k) or a fine-grained clustering (e.g., PUNCH fragments)
   std::string initial_partition_filename { };
   bool initial_partition_is_kway = true;
+  // ! Fragment mode: continue top-level coarsening without the fragment restriction
+  // ! once it stalls (otherwise, the restriction is only lifted for initial partitioning)
+  bool initial_partition_relax_on_stall = true;
+  // ! Fragment mode: V-cycles after the first cycle also do not contract across fragments
+  bool initial_partition_vcycle_fragments = false;
   std::string graph_partition_output_folder {};
   std::string graph_partition_filename { };
   std::string graph_community_filename { };
@@ -117,6 +122,9 @@ struct CoarseningParameters {
   double minimum_shrink_factor = 1.1;
   double maximum_shrink_factor = 2.5;
   size_t vertex_degree_sampling_threshold = 200000;
+  // If coarsening stalls, relax the community IDs once to (community % k) and continue
+  // coarsening (used for fragments given as initial partition, see Multilevel::partitionVCycle)
+  bool relax_communities_on_stall = false;
 
   // parameters for deterministic coarsening
   size_t num_sub_rounds_deterministic = 16;

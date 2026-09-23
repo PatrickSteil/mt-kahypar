@@ -28,7 +28,9 @@
 #include <iostream>
 #include <chrono>
 #include <algorithm>
+#include <cstdint>
 #include <exception>
+#include <limits>
 #include <vector>
 
 #include "include/lib_generic_impls.h"
@@ -68,9 +70,8 @@ PartitionID checkInitialPartition(const std::vector<PartitionID>& initial_partit
   }
   context.partition.initial_partition_is_kway = max_id < context.partition.k;
 
-  if ( context.partition.mode != Mode::direct || context.isNLevelPartitioning() ) {
-    throw InvalidParameterException(
-      "Initial partitions are only supported for multilevel presets in direct mode (e.g., --preset-type=default)!");
+  if ( context.partition.mode != Mode::direct ) {
+    throw InvalidParameterException("Initial partitions are only supported in direct mode!");
   }
   if ( context.partition.fixed_vertex_filename != "" ) {
     throw InvalidParameterException("Initial partitions can not be combined with fixed vertices!");
@@ -84,6 +85,11 @@ PartitionID checkInitialPartition(const std::vector<PartitionID>& initial_partit
     if ( context.partition.objective == Objective::steiner_tree ) {
       throw InvalidParameterException(
         "Initial partitions with more than k blocks are not supported for the steiner_tree objective!");
+    }
+    // Community IDs store fragment * k + block
+    if ( static_cast<int64_t>(max_id + 1) * context.partition.k >
+         static_cast<int64_t>(std::numeric_limits<PartitionID>::max()) ) {
+      throw InvalidInputException("Too many fragments in initial partition file (#fragments * k exceeds 2^31)!");
     }
   }
   return std::max(context.partition.k, max_id + 1);
@@ -186,9 +192,10 @@ int run(int argc, char* argv[]) {
   // Partition Hypergraph
   HighResClockTimepoint start = std::chrono::high_resolution_clock::now();
   if ( context.partition.initial_partition_filename != "" ) {
-    // Start from the given partition: a single V-cycle that either uses the
-    // input as initial solution (k-way) or only restricts coarsening (fragments)
-    context.partition.num_vcycles = std::max(context.partition.num_vcycles, UL(1));
+    // Start from the given partition: one additional cycle that either uses the
+    // input as initial solution (k-way) or only restricts coarsening (fragments),
+    // followed by --num-vcycles V-cycles (as when partitioning from scratch)
+    context.partition.num_vcycles += 1;
     PartitionerFacade::improve(partitioned_hypergraph, context, target_graph.get());
   } else {
     partitioned_hypergraph = PartitionerFacade::partition(hypergraph, context, target_graph.get());
