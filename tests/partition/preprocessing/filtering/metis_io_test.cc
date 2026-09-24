@@ -55,3 +55,21 @@ TEST(MetisIoTest, ParsesEdgeAndVertexWeights) {
   EXPECT_EQ(weight_of(graph, 0, 1), 7);
   EXPECT_EQ(weight_of(graph, 1, 2), 4);
 }
+
+TEST(MetisIoTest, WrittenGraphReadsBackIdentically) {
+  std::vector<NodeWeight> weights = {3, 1, 4, 1};
+  std::vector<EdgeListEntry> edges = {{0, 1, 5}, {1, 2, 9}, {0, 3, 2}};
+  FilterGraph graph = build_csr_from_edge_list(edges, weights);
+
+  const std::string path = "metis_io_test_roundtrip.graph";
+  write_metis_graph(graph, path);
+  FilterGraph read_back = read_metis_graph(path);
+  std::remove(path.c_str());
+
+  ASSERT_EQ(read_back.numNodes(), 4u);
+  ASSERT_EQ(read_back.numEdges(), 3u);
+  for (NodeID v = 0; v < 4; ++v) EXPECT_EQ(read_back.node_weight[v], weights[v]);
+  EXPECT_EQ(weight_of(read_back, 0, 1), 5);
+  EXPECT_EQ(weight_of(read_back, 1, 2), 9);
+  EXPECT_EQ(weight_of(read_back, 0, 3), 2);
+}

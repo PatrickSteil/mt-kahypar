@@ -14,5 +14,10 @@ namespace filtering {
 // build_csr_from_edge_list requires a simple graph. Throws on parse errors.
 FilterGraph read_metis_graph(const std::string& path);
 
+// Writes `graph` as a METIS graph file with vertex and edge weights (format
+// code 11), e.g. the fragment graph for partitioning with Mt-KaHyPar.
+// Throws std::runtime_error if the file cannot be written.
+void write_metis_graph(const FilterGraph& graph, const std::string& path);
+
 }  // namespace filtering
 }  // namespace mt_kahypar

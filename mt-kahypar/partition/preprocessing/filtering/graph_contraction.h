@@ -19,5 +19,13 @@ struct ContractionResult {
 // weights; self-loops created by contraction are dropped.
 ContractionResult contract_graph(const FilterGraph& graph, const AtomicUnionFind& uf);
 
+// Contracts `graph` according to `mapping` (input node id -> output node id in
+// [0, num_nodes)): output node i gets the summed weight of all input nodes
+// mapped to it; parallel edges are merged by summing their weights and
+// self-loops are dropped.
+FilterGraph contract_graph_by_mapping(const FilterGraph& graph,
+                                      const std::vector<NodeID>& mapping,
+                                      size_t num_nodes);
+
 }  // namespace filtering
 }  // namespace mt_kahypar

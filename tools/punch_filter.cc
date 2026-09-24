@@ -8,6 +8,8 @@
 
 #include "mt-kahypar/partition/preprocessing/filtering/dimacs_io.h"
 #include "mt-kahypar/partition/preprocessing/filtering/filtering_pipeline.h"
+#include "mt-kahypar/partition/preprocessing/filtering/graph_contraction.h"
+#include "mt-kahypar/partition/preprocessing/filtering/metis_io.h"
 
 using namespace mt_kahypar::filtering;
 
@@ -16,7 +18,7 @@ void print_usage(const char* prog) {
   std::cerr
       << "Usage: " << prog << " --graph <dimacs.gr> --U <size> "
       << "[--alpha 1.0] [--f 10] [--coverage 2] [--cut-side source|sink|both] [--arc-weights] [--tau 5] "
-      << "[--dump-kept-edges <path>] [--dump-partition <path>] [--verbose]\n";
+      << "[--dump-kept-edges <path>] [--dump-partition <path>] [--dump-fragment-graph <path>] [--verbose]\n";
 }
 }  // namespace
 
@@ -24,6 +26,7 @@ int main(int argc, char** argv) {
   std::string graph_path;
   std::string dump_path;
   std::string partition_path;
+  std::string fragment_graph_path;
   NodeWeight U = 0;
   NodeWeight tau = 5;
   double alpha = 1.0;
@@ -69,6 +72,8 @@ int main(int argc, char** argv) {
       dump_path = next();
     else if (arg == "--dump-partition")
       partition_path = next();
+    else if (arg == "--dump-fragment-graph")
+      fragment_graph_path = next();
     else if (arg == "--arc-weights")
       use_arc_weights = true;
     else if (arg == "--verbose")
@@ -126,6 +131,18 @@ int main(int argc, char** argv) {
     std::cout << "Wrote partition (" << result.fragment_id.size()
               << " vertices, " << result.fragment_size.size()
               << " fragments) to " << partition_path << "\n";
+  }
+
+  if (!fragment_graph_path.empty()) {
+    // Fragment graph: one vertex per fragment (weight = fragment size), edge
+    // weights = number (or total weight) of original edges between fragments.
+    // Any partition of it is a partition of the input graph with the same cut.
+    std::vector<NodeID> mapping(result.fragment_id.begin(), result.fragment_id.end());
+    FilterGraph fragment_graph =
+        contract_graph_by_mapping(graph, mapping, result.fragment_size.size());
+    write_metis_graph(fragment_graph, fragment_graph_path);
+    std::cout << "Wrote fragment graph (" << fragment_graph.numNodes() << " vertices, "
+              << fragment_graph.numEdges() << " edges) to " << fragment_graph_path << "\n";
   }
 
   return 0;

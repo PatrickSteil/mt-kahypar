@@ -2,6 +2,9 @@
 
 #include <tbb/parallel_sort.h>
 
+#include <fstream>
+#include <stdexcept>
+
 #include "mt-kahypar/io/hypergraph_io.h"
 
 namespace mt_kahypar {
@@ -42,6 +45,19 @@ FilterGraph read_metis_graph(const std::string& path) {
     for (size_t v = 0; v < num_nodes; ++v) weights[v] = static_cast<NodeWeight>(node_weights[v]);
   }
   return build_csr_from_edge_list(edge_list, weights);
+}
+
+void write_metis_graph(const FilterGraph& graph, const std::string& path) {
+  std::ofstream out(path);
+  if (!out) throw std::runtime_error("could not write METIS graph file: " + path);
+  out << graph.numNodes() << " " << graph.numEdges() << " 11\n";
+  for (NodeID v = 0; v < static_cast<NodeID>(graph.numNodes()); ++v) {
+    out << graph.node_weight[v];
+    for (EdgeID pos = graph.node_begin[v]; pos < graph.node_begin[v + 1]; ++pos) {
+      out << " " << (graph.adj[pos] + 1) << " " << graph.edge_weight[graph.adj_edge[pos]];
+    }
+    out << "\n";
+  }
 }
 
 }  // namespace filtering

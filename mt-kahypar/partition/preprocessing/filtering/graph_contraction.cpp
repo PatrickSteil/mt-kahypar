@@ -18,7 +18,17 @@ ContractionResult contract_graph(const FilterGraph& graph, const AtomicUnionFind
     mapping[v] = mapping[uf.find(static_cast<uint32_t>(v))];
   }
 
-  std::vector<NodeWeight> node_weights(next_id, 0);
+  ContractionResult result;
+  result.graph = contract_graph_by_mapping(graph, mapping, next_id);
+  result.mapping = std::move(mapping);
+  return result;
+}
+
+FilterGraph contract_graph_by_mapping(const FilterGraph& graph,
+                                      const std::vector<NodeID>& mapping,
+                                      size_t num_nodes) {
+  const size_t n = graph.numNodes();
+  std::vector<NodeWeight> node_weights(num_nodes, 0);
   for (size_t v = 0; v < n; ++v) node_weights[mapping[v]] += graph.node_weight[v];
 
   // Merge parallel edges (sum weights), drop self-loops created by contraction.
@@ -43,11 +53,7 @@ ContractionResult contract_graph(const FilterGraph& graph, const AtomicUnionFind
   for (auto& [endpoints, weight] : merged_edges) {
     edges.push_back(EdgeListEntry{endpoints.first, endpoints.second, weight});
   }
-
-  ContractionResult result;
-  result.graph = build_csr_from_edge_list(edges, node_weights);
-  result.mapping = std::move(mapping);
-  return result;
+  return build_csr_from_edge_list(edges, node_weights);
 }
 
 }  // namespace filtering
