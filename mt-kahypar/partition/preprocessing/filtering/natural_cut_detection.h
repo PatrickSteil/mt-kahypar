@@ -4,17 +4,24 @@
 #include <random>
 #include <vector>
 
-#include "mt-kahypar/partition/preprocessing/filtering/local_max_flow.h"
 #include "mt-kahypar/partition/preprocessing/filtering/filter_graph.h"
+#include "mt-kahypar/partition/preprocessing/filtering/local_max_flow.h"
 
 namespace mt_kahypar {
 namespace filtering {
+
+// Which minimum cut of a natural-cut subproblem is kept. On unit-capacity
+// road networks, a subproblem usually has several distinct min cuts: Source
+// keeps the one closest to the core, Sink the one closest to the ring, and
+// Both keeps both (more natural cuts, hence more and smaller fragments).
+enum class CutSide { Source, Sink, Both };
 
 struct NaturalCutParams {
   NodeWeight U;
   double alpha = 1.0;
   double f = 10.0;
   int coverage = 2;
+  CutSide cut_side = CutSide::Source;
 };
 
 // Scratch buffers reused across many BFS-growth + local-min-cut calls, to
@@ -36,6 +43,7 @@ struct NaturalCutScratch {
   // Local flow network and min-cut buffers, reused across calls
   FlowNetwork network;
   std::vector<char> reachable;
+  std::vector<char> reaches_sink;
   std::vector<uint32_t> flow_queue;
 };
 
@@ -52,18 +60,18 @@ struct NaturalCutScratch {
 // in-line comment at the core-selection loop in the .cpp for the full
 // argument). `covered` must have size graph.numNodes().
 std::vector<EdgeID> compute_natural_cut(const FilterGraph& graph, NodeID seed,
-                                         const NaturalCutParams& params,
-                                         NaturalCutScratch& scratch,
-                                         std::vector<char>& covered);
+                                        const NaturalCutParams& params,
+                                        NaturalCutScratch& scratch,
+                                        std::vector<char>& covered);
 
 // Runs the full sequential natural-cut detection procedure (design spec
 // section 5): for each of params.coverage sweeps, resets per-sweep coverage,
 // visits vertices in a freshly shuffled order, and for every not-yet-covered
 // vertex runs compute_natural_cut as a new seed, accumulating its cut edges
 // into the returned keep set (which persists across all sweeps).
-std::vector<char> run_natural_cut_detection_sequential(const FilterGraph& graph,
-                                                        const NaturalCutParams& params,
-                                                        std::mt19937_64& rng);
+std::vector<char> run_natural_cut_detection_sequential(
+    const FilterGraph& graph, const NaturalCutParams& params,
+    std::mt19937_64& rng);
 
 // Parallel counterpart to run_natural_cut_detection_sequential, with the
 // same semantics (design spec section 5): per sweep, a pre-shuffled vertex
@@ -77,8 +85,9 @@ std::vector<char> run_natural_cut_detection_sequential(const FilterGraph& graph,
 // prints a running max-flow-solve count (one solve per compute_natural_cut
 // call) every 5000 solves, plus a per-sweep
 // summary, to stderr.
-std::vector<char> run_natural_cut_detection(const FilterGraph& graph, const NaturalCutParams& params,
-                                             bool verbose = false);
+std::vector<char> run_natural_cut_detection(const FilterGraph& graph,
+                                            const NaturalCutParams& params,
+                                            bool verbose = false);
 
 }  // namespace filtering
 }  // namespace mt_kahypar

@@ -15,7 +15,7 @@ void write_file(const std::string& path, const std::string& content) {
 }
 }  // namespace
 
-TEST(DimacsIoTest, ParsesSimpleGraph) {
+TEST(DimacsIoTest, ParsesSimpleGraphWithArcWeights) {
   const std::string path = "dimacs_io_test_simple.gr";
   write_file(path,
       "c comment line\n"
@@ -27,7 +27,7 @@ TEST(DimacsIoTest, ParsesSimpleGraph) {
       "a 1 3 2\n"
       "a 3 1 2\n");
 
-  FilterGraph graph = read_dimacs_graph(path);
+  FilterGraph graph = read_dimacs_graph(path, /* use_arc_weights */ true);
   std::remove(path.c_str());
 
   ASSERT_EQ(graph.numNodes(), 3u);
@@ -54,11 +54,21 @@ TEST(DimacsIoTest, ParsesSimpleGraph) {
 TEST(DimacsIoTest, UsesMinimumOfForwardAndBackwardWeightWhenInconsistent) {
   const std::string path = "dimacs_io_test_weights.gr";
   write_file(path, "p sp 2 2\na 1 2 4\na 2 1 5\n");
-  FilterGraph graph = read_dimacs_graph(path);
+  FilterGraph graph = read_dimacs_graph(path, /* use_arc_weights */ true);
   std::remove(path.c_str());
 
   ASSERT_EQ(graph.numEdges(), 1u);
   EXPECT_EQ(graph.edge_weight[0], 4);
+}
+
+TEST(DimacsIoTest, UsesUnitWeightsByDefault) {
+  const std::string path = "dimacs_io_test_unit.gr";
+  write_file(path, "p sp 3 4\na 1 2 4\na 2 1 5\na 2 3 9\na 3 2 9\n");
+  FilterGraph graph = read_dimacs_graph(path);
+  std::remove(path.c_str());
+
+  ASSERT_EQ(graph.numEdges(), 2u);
+  for (EdgeID e = 0; e < graph.numEdges(); ++e) EXPECT_EQ(graph.edge_weight[e], 1);
 }
 
 TEST(DimacsIoTest, ThrowsOnMissingFile) {

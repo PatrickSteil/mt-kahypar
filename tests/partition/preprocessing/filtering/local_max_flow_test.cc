@@ -109,3 +109,29 @@ TEST(PushRelabelMaxFlowTest, NetworkCanBeReusedAcrossSolves) {
     EXPECT_EQ(push_relabel_max_flow(network), 4 + round);
   }
 }
+
+TEST(MinCutSidesTest, SourceAndSinkSideCutsDifferOnPathWithTiedCuts) {
+  // Path s(0)-a(1)-t(2) with unit capacities: both {s-a} and {a-t} are
+  // minimum cuts. The source-side cut is closest to s, the sink-side cut
+  // closest to t, so a lies on different sides.
+  for (const bool use_push_relabel : {false, true}) {
+    FlowNetwork network(3);
+    network.source = 0;
+    network.sink = 2;
+    network.add_edge(0, 1, 1);
+    network.add_edge(1, 2, 1);
+    EXPECT_EQ(use_push_relabel ? push_relabel_max_flow(network) : dinic_max_flow(network), 1);
+
+    std::vector<char> reachable;
+    std::vector<char> reaches_sink;
+    std::vector<uint32_t> queue;
+    min_cut_reachable_from_source(network, reachable, queue);
+    min_cut_reaching_sink(network, reaches_sink, queue);
+    EXPECT_TRUE(reachable[0]);
+    EXPECT_FALSE(reachable[1]);
+    EXPECT_FALSE(reachable[2]);
+    EXPECT_FALSE(reaches_sink[0]);
+    EXPECT_FALSE(reaches_sink[1]);
+    EXPECT_TRUE(reaches_sink[2]);
+  }
+}

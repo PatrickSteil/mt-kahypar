@@ -238,5 +238,25 @@ void min_cut_reachable_from_source(const FlowNetwork& network, std::vector<char>
   }
 }
 
+void min_cut_reaching_sink(const FlowNetwork& network, std::vector<char>& reaches_sink,
+                           std::vector<uint32_t>& queue) {
+  reaches_sink.assign(network.numNodes(), 0);
+  queue.clear();
+  reaches_sink[network.sink] = 1;
+  queue.push_back(network.sink);
+  // Backward search: u reaches v if the residual capacity of arc u -> v,
+  // i.e., of the reverse of arc v -> u, is positive.
+  for (size_t head = 0; head < queue.size(); ++head) {
+    const uint32_t v = queue[head];
+    for (uint32_t a = network.firstArc(v); a < network.firstArc(v + 1); ++a) {
+      const uint32_t u = network.head(a);
+      if (network.residual(network.reverse(a)) > 0 && !reaches_sink[u]) {
+        reaches_sink[u] = 1;
+        queue.push_back(u);
+      }
+    }
+  }
+}
+
 }  // namespace filtering
 }  // namespace mt_kahypar

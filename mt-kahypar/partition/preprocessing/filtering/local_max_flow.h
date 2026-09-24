@@ -94,6 +94,12 @@ int64_t push_relabel_max_flow(FlowNetwork& network);
 void min_cut_reachable_from_source(const FlowNetwork& network, std::vector<char>& reachable,
                                    std::vector<uint32_t>& queue);
 
+// Must be called after dinic_max_flow or push_relabel_max_flow on the same
+// network. Writes, per node, whether it can reach `sink` in the final residual
+// graph. The complement is the source side of the min cut closest to the sink.
+void min_cut_reaching_sink(const FlowNetwork& network, std::vector<char>& reaches_sink,
+                           std::vector<uint32_t>& queue);
+
 inline std::vector<char> min_cut_reachable_from_source(const FlowNetwork& network) {
   std::vector<char> reachable;
   std::vector<uint32_t> queue;

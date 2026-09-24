@@ -15,9 +15,10 @@ uint64_t undirected_key(NodeID u, NodeID v) {
 }
 }  // namespace
 
-FilterGraph read_dimacs_graph(const std::string& path) {
+FilterGraph read_dimacs_graph(const std::string& path, bool use_arc_weights) {
   std::ifstream in(path);
-  if (!in) throw std::runtime_error("could not open DIMACS graph file: " + path);
+  if (!in)
+    throw std::runtime_error("could not open DIMACS graph file: " + path);
 
   size_t n = 0;
   size_t num_arcs = 0;
@@ -36,19 +37,21 @@ FilterGraph read_dimacs_graph(const std::string& path) {
       header_seen = true;
     } else if (tag == 'a') {
       if (!header_seen) {
-        throw std::runtime_error("DIMACS file has an arc line before the 'p' header: " + path);
+        throw std::runtime_error(
+            "DIMACS file has an arc line before the 'p' header: " + path);
       }
       size_t u1 = 0, v1 = 0;
       long long w = 0;
       iss >> u1 >> v1 >> w;
       if (u1 == 0 || v1 == 0 || u1 > n || v1 > n) {
-        throw std::runtime_error("DIMACS arc references an out-of-range node id: " + path);
+        throw std::runtime_error(
+            "DIMACS arc references an out-of-range node id: " + path);
       }
       const NodeID u = static_cast<NodeID>(u1 - 1);
       const NodeID v = static_cast<NodeID>(v1 - 1);
       if (u == v) continue;
       const uint64_t key = undirected_key(u, v);
-      const auto weight = static_cast<EdgeWeight>(w);
+      const auto weight = use_arc_weights ? static_cast<EdgeWeight>(w) : EdgeWeight(1);
       auto it = edges_by_key.find(key);
       if (it == edges_by_key.end()) {
         edges_by_key.emplace(key, EdgeListEntry{u, v, weight});
@@ -61,7 +64,8 @@ FilterGraph read_dimacs_graph(const std::string& path) {
     }
   }
 
-  if (!header_seen) throw std::runtime_error("DIMACS file has no 'p' header: " + path);
+  if (!header_seen)
+    throw std::runtime_error("DIMACS file has no 'p' header: " + path);
 
   std::vector<EdgeListEntry> edges;
   edges.reserve(edges_by_key.size());

@@ -22,7 +22,7 @@ FilteringResult run_filtering_pipeline(const FilterGraph& graph, const Filtering
   const auto natural_cut_start = std::chrono::steady_clock::now();
   std::vector<char> keep = run_natural_cut_detection(
       tiny_cut_result.graph,
-      NaturalCutParams{params.U, params.alpha, params.f, params.coverage},
+      NaturalCutParams{params.U, params.alpha, params.f, params.coverage, params.cut_side},
       params.verbose);
   if (params.verbose) {
     const double seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - natural_cut_start).count();
