@@ -21,9 +21,10 @@ constexpr EdgeID kInvalidEdge = std::numeric_limits<EdgeID>::max();
 // Plain CSR representation of an undirected weighted graph, independent of
 // Mt-KaHyPar's hypergraph/partitioning types (see design spec section 3).
 struct FilterGraph {
-  ds::Array<EdgeID> node_begin;       // size numNodes() + 1
-  ds::Array<NodeID> adj;              // size 2 * numEdges(), neighbor per half-edge
-  ds::Array<EdgeID> adj_edge;         // size 2 * numEdges(), half-edge -> canonical edge id
+  ds::Array<EdgeID> node_begin;  // size numNodes() + 1
+  ds::Array<NodeID> adj;         // size 2 * numEdges(), neighbor per half-edge
+  ds::Array<EdgeID>
+      adj_edge;  // size 2 * numEdges(), half-edge -> canonical edge id
   ds::Array<NodeWeight> node_weight;  // size numNodes()
   ds::Array<EdgeWeight> edge_weight;  // size numEdges()
 
@@ -44,12 +45,14 @@ struct EdgeListEntry {
 // Callers must not pass self-loops (u == v) or duplicate edges between the
 // same pair; graph_contraction.cpp is responsible for merging/dropping those
 // when a contraction would create them.
-FilterGraph build_csr_from_edge_list(const std::vector<EdgeListEntry>& edges,
-                                      const std::vector<NodeWeight>& node_weights);
+FilterGraph build_csr_from_edge_list(
+    const std::vector<EdgeListEntry>& edges,
+    const std::vector<NodeWeight>& node_weights);
 
 // Recovers the (u, v) endpoint pair for every canonical edge id, by scanning
 // the adjacency structure once (O(numNodes() + numEdges())).
-std::vector<std::pair<NodeID, NodeID>> compute_edge_endpoints(const FilterGraph& graph);
+std::vector<std::pair<NodeID, NodeID>> compute_edge_endpoints(
+    const FilterGraph& graph);
 
 }  // namespace filtering
 }  // namespace mt_kahypar

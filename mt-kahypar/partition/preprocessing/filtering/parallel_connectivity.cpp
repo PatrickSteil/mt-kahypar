@@ -1,11 +1,11 @@
 // mt-kahypar/partition/preprocessing/filtering/parallel_connectivity.cpp
 #include "mt-kahypar/partition/preprocessing/filtering/parallel_connectivity.h"
 
+#include <tbb/parallel_for.h>
+
 #include <cassert>
 #include <deque>
 #include <unordered_map>
-
-#include <tbb/parallel_for.h>
 
 #include "mt-kahypar/partition/preprocessing/filtering/union_find.h"
 
@@ -13,7 +13,8 @@ namespace mt_kahypar {
 namespace filtering {
 
 namespace {
-std::vector<NodeID> components_from_union_find(const FilterGraph& graph, AtomicUnionFind& uf) {
+std::vector<NodeID> components_from_union_find(const FilterGraph& graph,
+                                               AtomicUnionFind& uf) {
   const size_t n = graph.numNodes();
   std::vector<NodeID> component(n);
   tbb::parallel_for(size_t(0), n, [&](size_t v) {
@@ -27,7 +28,8 @@ std::vector<NodeID> parallel_connected_components(const FilterGraph& graph) {
   const size_t n = graph.numNodes();
   AtomicUnionFind uf(n);
   tbb::parallel_for(size_t(0), n, [&](size_t v) {
-    for (EdgeID pos = graph.node_begin[v]; pos < graph.node_begin[v + 1]; ++pos) {
+    for (EdgeID pos = graph.node_begin[v]; pos < graph.node_begin[v + 1];
+         ++pos) {
       uf.unite(static_cast<uint32_t>(v), static_cast<uint32_t>(graph.adj[pos]));
     }
   });
@@ -39,7 +41,8 @@ std::vector<NodeID> parallel_connected_components_excluding(
   const size_t n = graph.numNodes();
   AtomicUnionFind uf(n);
   tbb::parallel_for(size_t(0), n, [&](size_t v) {
-    for (EdgeID pos = graph.node_begin[v]; pos < graph.node_begin[v + 1]; ++pos) {
+    for (EdgeID pos = graph.node_begin[v]; pos < graph.node_begin[v + 1];
+         ++pos) {
       if (excluded_edge[graph.adj_edge[pos]]) continue;
       uf.unite(static_cast<uint32_t>(v), static_cast<uint32_t>(graph.adj[pos]));
     }
@@ -48,15 +51,16 @@ std::vector<NodeID> parallel_connected_components_excluding(
 }
 
 SpanningForest build_spanning_forest(const FilterGraph& graph,
-                                      const std::vector<NodeID>& component,
-                                      const std::vector<NodeID>& roots_in) {
+                                     const std::vector<NodeID>& component,
+                                     const std::vector<NodeID>& roots_in) {
   const size_t n = graph.numNodes();
 
   std::vector<NodeID> roots = roots_in;
   if (roots.empty()) {
     std::unordered_map<NodeID, bool> seen;
     for (size_t v = 0; v < n; ++v) {
-      if (seen.emplace(component[v], true).second) roots.push_back(static_cast<NodeID>(v));
+      if (seen.emplace(component[v], true).second)
+        roots.push_back(static_cast<NodeID>(v));
     }
   } else {
     // Debug-only precondition check: no two supplied roots may belong to
@@ -70,7 +74,8 @@ SpanningForest build_spanning_forest(const FilterGraph& graph,
         seen_component[component[root]] = 1;
       }
       return true;
-    }() && "roots must contain at most one entry per distinct component value, each a valid vertex id");
+    }() && "roots must contain at most one entry per distinct component value, "
+           "each a valid vertex id");
   }
 
   SpanningForest forest;
@@ -95,7 +100,8 @@ SpanningForest build_spanning_forest(const FilterGraph& graph,
     while (!queue.empty()) {
       const NodeID u = queue.front();
       queue.pop_front();
-      for (EdgeID pos = graph.node_begin[u]; pos < graph.node_begin[u + 1]; ++pos) {
+      for (EdgeID pos = graph.node_begin[u]; pos < graph.node_begin[u + 1];
+           ++pos) {
         const NodeID v = graph.adj[pos];
         if (forest.parent[v] == kInvalidNode) {
           forest.parent[v] = u;

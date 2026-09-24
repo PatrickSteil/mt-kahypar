@@ -1,11 +1,11 @@
 // mt-kahypar/partition/preprocessing/filtering/tiny_cut_detection.cpp
 #include "mt-kahypar/partition/preprocessing/filtering/tiny_cut_detection.h"
 
+#include <tbb/parallel_for.h>
+
 #include <chrono>
 #include <iostream>
 #include <unordered_map>
-
-#include <tbb/parallel_for.h>
 
 #include "mt-kahypar/partition/preprocessing/filtering/cut_signatures.h"
 #include "mt-kahypar/partition/preprocessing/filtering/parallel_connectivity.h"
@@ -13,7 +13,8 @@
 namespace mt_kahypar {
 namespace filtering {
 
-ContractionResult contract_component_tree(const FilterGraph& graph, const TinyCutParams& params) {
+ContractionResult contract_component_tree(const FilterGraph& graph,
+                                          const TinyCutParams& params) {
   const size_t n = graph.numNodes();
   const size_t m = graph.numEdges();
 
@@ -24,7 +25,8 @@ ContractionResult contract_component_tree(const FilterGraph& graph, const TinyCu
   std::vector<char> is_bridge = compute_bridges(graph, sigs);
 
   // Step 2: blocks = connected components of the graph with bridges removed.
-  std::vector<NodeID> block_rep = parallel_connected_components_excluding(graph, is_bridge);
+  std::vector<NodeID> block_rep =
+      parallel_connected_components_excluding(graph, is_bridge);
   std::unordered_map<NodeID, NodeID> dense_block_id;
   std::vector<NodeID> block_of(n);
   for (size_t v = 0; v < n; ++v) {
@@ -40,30 +42,35 @@ ContractionResult contract_component_tree(const FilterGraph& graph, const TinyCu
   const NodeID num_blocks = static_cast<NodeID>(dense_block_id.size());
 
   std::vector<NodeWeight> block_weight(num_blocks, 0);
-  for (size_t v = 0; v < n; ++v) block_weight[block_of[v]] += graph.node_weight[v];
+  for (size_t v = 0; v < n; ++v)
+    block_weight[block_of[v]] += graph.node_weight[v];
 
   // Step 3: the block quotient graph. Its edges are exactly the bridges
   // (each bridge connects exactly two distinct blocks); this quotient graph
   // is a forest -- one tree per connected component of the original graph --
   // matching the design spec's "component tree T".
-  std::vector<std::pair<NodeID, NodeID>> edge_endpoints = compute_edge_endpoints(graph);
+  std::vector<std::pair<NodeID, NodeID>> edge_endpoints =
+      compute_edge_endpoints(graph);
   std::vector<EdgeListEntry> quotient_edges;
   for (EdgeID e = 0; e < static_cast<EdgeID>(m); ++e) {
     if (!is_bridge[e]) continue;
-    quotient_edges.push_back(EdgeListEntry{
-        block_of[edge_endpoints[e].first], block_of[edge_endpoints[e].second], graph.edge_weight[e]});
+    quotient_edges.push_back(EdgeListEntry{block_of[edge_endpoints[e].first],
+                                           block_of[edge_endpoints[e].second],
+                                           graph.edge_weight[e]});
   }
   FilterGraph quotient = build_csr_from_edge_list(quotient_edges, block_weight);
 
   // Step 4: root each quotient-forest component at its heaviest block
   // ("the edge-connected component with maximum size", design spec 4.2).
-  std::vector<NodeID> quotient_component = parallel_connected_components(quotient);
+  std::vector<NodeID> quotient_component =
+      parallel_connected_components(quotient);
   std::unordered_map<NodeID, NodeID> best_root_for_component;
   std::unordered_map<NodeID, NodeWeight> best_weight_for_component;
   for (NodeID b = 0; b < num_blocks; ++b) {
     const NodeID comp = quotient_component[b];
     auto it = best_weight_for_component.find(comp);
-    if (it == best_weight_for_component.end() || quotient.node_weight[b] > it->second) {
+    if (it == best_weight_for_component.end() ||
+        quotient.node_weight[b] > it->second) {
       best_weight_for_component[comp] = quotient.node_weight[b];
       best_root_for_component[comp] = b;
     }
@@ -71,14 +78,17 @@ ContractionResult contract_component_tree(const FilterGraph& graph, const TinyCu
   std::vector<NodeID> roots;
   roots.reserve(best_root_for_component.size());
   for (auto& [comp, root] : best_root_for_component) roots.push_back(root);
-  SpanningForest quotient_forest = build_spanning_forest(quotient, quotient_component, roots);
+  SpanningForest quotient_forest =
+      build_spanning_forest(quotient, quotient_component, roots);
 
   // Step 5: subtree weights over the quotient tree, bottom-up via reverse
   // BFS order (BFS order is non-decreasing in depth, so every child is
   // folded into its parent before the parent itself is used).
   std::vector<NodeWeight> subtree_weight(num_blocks);
-  for (NodeID b = 0; b < num_blocks; ++b) subtree_weight[b] = quotient.node_weight[b];
-  for (auto it = quotient_forest.bfs_order.rbegin(); it != quotient_forest.bfs_order.rend(); ++it) {
+  for (NodeID b = 0; b < num_blocks; ++b)
+    subtree_weight[b] = quotient.node_weight[b];
+  for (auto it = quotient_forest.bfs_order.rbegin();
+       it != quotient_forest.bfs_order.rend(); ++it) {
     const NodeID b = *it;
     const NodeID parent = quotient_forest.parent[b];
     if (parent != b) subtree_weight[parent] += subtree_weight[b];
@@ -127,14 +137,18 @@ ContractionResult contract_component_tree(const FilterGraph& graph, const TinyCu
     const NodeID parent = quotient_forest.parent[b];
     if (parent != b && is_within_chosen_subtree[parent]) {
       is_within_chosen_subtree[b] = 1;
-      vertex_groups.unite(block_representative_vertex[b], block_representative_vertex[parent]);
+      vertex_groups.unite(block_representative_vertex[b],
+                          block_representative_vertex[parent]);
       continue;
     }
     if (subtree_weight[b] <= params.U) {
       is_within_chosen_subtree[b] = 1;
       if (parent != b && subtree_weight[b] <= params.tau &&
-          subtree_weight[b] + quotient.node_weight[parent] + tau_merged_extra_weight[parent] <= params.U) {
-        vertex_groups.unite(block_representative_vertex[b], block_representative_vertex[parent]);
+          subtree_weight[b] + quotient.node_weight[parent] +
+                  tau_merged_extra_weight[parent] <=
+              params.U) {
+        vertex_groups.unite(block_representative_vertex[b],
+                            block_representative_vertex[parent]);
         tau_merged_extra_weight[parent] += subtree_weight[b];
       }
     }
@@ -148,7 +162,8 @@ ContractionResult contract_component_tree(const FilterGraph& graph, const TinyCu
   for (size_t v = 0; v < n; ++v) {
     const NodeID b = block_of[v];
     if (is_within_chosen_subtree[b]) {
-      vertex_groups.unite(block_representative_vertex[b], static_cast<NodeID>(v));
+      vertex_groups.unite(block_representative_vertex[b],
+                          static_cast<NodeID>(v));
     }
   }
 
@@ -156,15 +171,21 @@ ContractionResult contract_component_tree(const FilterGraph& graph, const TinyCu
 }
 
 namespace {
-std::vector<NodeID> walk_chain_from(const FilterGraph& graph, const std::vector<char>& is_deg2,
-                                     std::vector<char>& visited, NodeID prev, NodeID cur) {
+std::vector<NodeID> walk_chain_from(const FilterGraph& graph,
+                                    const std::vector<char>& is_deg2,
+                                    std::vector<char>& visited, NodeID prev,
+                                    NodeID cur) {
   std::vector<NodeID> chain;
   while (is_deg2[cur] && !visited[cur]) {
     visited[cur] = 1;
     chain.push_back(cur);
     NodeID next = kInvalidNode;
-    for (EdgeID pos = graph.node_begin[cur]; pos < graph.node_begin[cur + 1]; ++pos) {
-      if (graph.adj[pos] != prev) { next = graph.adj[pos]; break; }
+    for (EdgeID pos = graph.node_begin[cur]; pos < graph.node_begin[cur + 1];
+         ++pos) {
+      if (graph.adj[pos] != prev) {
+        next = graph.adj[pos];
+        break;
+      }
     }
     prev = cur;
     cur = next;
@@ -173,10 +194,12 @@ std::vector<NodeID> walk_chain_from(const FilterGraph& graph, const std::vector<
 }
 }  // namespace
 
-ContractionResult contract_degree2_chains(const FilterGraph& graph, NodeWeight U) {
+ContractionResult contract_degree2_chains(const FilterGraph& graph,
+                                          NodeWeight U) {
   const size_t n = graph.numNodes();
   std::vector<char> is_deg2(n);
-  for (size_t v = 0; v < n; ++v) is_deg2[v] = (graph.degree(static_cast<NodeID>(v)) == 2);
+  for (size_t v = 0; v < n; ++v)
+    is_deg2[v] = (graph.degree(static_cast<NodeID>(v)) == 2);
 
   std::vector<char> visited(n, 0);
   AtomicUnionFind uf(n);
@@ -193,7 +216,8 @@ ContractionResult contract_degree2_chains(const FilterGraph& graph, NodeWeight U
   // Chains anchored at both ends by a vertex of degree != 2.
   for (NodeID anchor = 0; anchor < static_cast<NodeID>(n); ++anchor) {
     if (is_deg2[anchor]) continue;
-    for (EdgeID pos = graph.node_begin[anchor]; pos < graph.node_begin[anchor + 1]; ++pos) {
+    for (EdgeID pos = graph.node_begin[anchor];
+         pos < graph.node_begin[anchor + 1]; ++pos) {
       const NodeID cur = graph.adj[pos];
       if (!is_deg2[cur] || visited[cur]) continue;
       try_contract_chain(walk_chain_from(graph, is_deg2, visited, anchor, cur));
@@ -203,7 +227,8 @@ ContractionResult contract_degree2_chains(const FilterGraph& graph, NodeWeight U
   // Pure cycles: components with no anchor at all.
   for (NodeID v = 0; v < static_cast<NodeID>(n); ++v) {
     if (!is_deg2[v] || visited[v]) continue;
-    try_contract_chain(walk_chain_from(graph, is_deg2, visited, kInvalidNode, v));
+    try_contract_chain(
+        walk_chain_from(graph, is_deg2, visited, kInvalidNode, v));
   }
 
   return contract_graph(graph, uf);
@@ -211,7 +236,8 @@ ContractionResult contract_degree2_chains(const FilterGraph& graph, NodeWeight U
 
 BoundedComponentsResult compute_bounded_components_excluding(
     const FilterGraph& graph, const std::vector<EdgeID>& excluded_edges,
-    const std::vector<NodeID>& seeds, NodeWeight total_graph_weight, NodeWeight U) {
+    const std::vector<NodeID>& seeds, NodeWeight total_graph_weight,
+    NodeWeight U) {
   const size_t n = graph.numNodes();
 
   // excluded_edges is always small (a 2-edge-cut class -- 2 in the
@@ -224,14 +250,15 @@ BoundedComponentsResult compute_bounded_components_excluding(
     return false;
   };
 
-  // Which seed-group first claimed v. Allocating (and initializing) an O(n) array per
-  // class would dominate the running time, since there can be hundreds of thousands of
-  // classes that each only visit a few vertices. Instead, each thread reuses one array,
-  // which is kInvalidNode everywhere between calls: we reset exactly the claimed
-  // vertices (all_visited) on return.
+  // Which seed-group first claimed v. Allocating (and initializing) an O(n)
+  // array per class would dominate the running time, since there can be
+  // hundreds of thousands of classes that each only visit a few vertices.
+  // Instead, each thread reuses one array, which is kInvalidNode everywhere
+  // between calls: we reset exactly the claimed vertices (all_visited) on
+  // return.
   static thread_local std::vector<NodeID> owner;
   if (owner.size() < n) owner.assign(n, kInvalidNode);
-  std::vector<NodeID> all_visited;             // every claimed vertex, for final bucketing
+  std::vector<NodeID> all_visited;  // every claimed vertex, for final bucketing
   struct ResetOwner {
     std::vector<NodeID>& owner;
     const std::vector<NodeID>& visited;
@@ -239,8 +266,8 @@ BoundedComponentsResult compute_bounded_components_excluding(
       for (NodeID v : visited) owner[v] = kInvalidNode;
     }
   } reset_owner{owner, all_visited};
-  std::vector<std::vector<NodeID>> queue;      // per seed-group BFS queue
-  std::vector<size_t> cursor;                  // per seed-group read cursor into `queue`
+  std::vector<std::vector<NodeID>> queue;  // per seed-group BFS queue
+  std::vector<size_t> cursor;  // per seed-group read cursor into `queue`
   std::vector<NodeWeight> group_weight;
 
   for (NodeID s : seeds) {
@@ -283,7 +310,8 @@ BoundedComponentsResult compute_bounded_components_excluding(
       continue;
     }
     const NodeID u = queue[g][cursor[g]++];
-    for (EdgeID pos = graph.node_begin[u]; pos < graph.node_begin[u + 1]; ++pos) {
+    for (EdgeID pos = graph.node_begin[u]; pos < graph.node_begin[u + 1];
+         ++pos) {
       const EdgeID e = graph.adj_edge[pos];
       if (is_excluded(e)) continue;
       const NodeID v = graph.adj[pos];
@@ -382,7 +410,8 @@ BoundedComponentsResult compute_bounded_components_excluding(
   return result;
 }
 
-ContractionResult contract_two_edge_cuts(const FilterGraph& graph, NodeWeight U) {
+ContractionResult contract_two_edge_cuts(const FilterGraph& graph,
+                                         NodeWeight U) {
   const size_t n = graph.numNodes();
   std::vector<NodeID> component = parallel_connected_components(graph);
   SpanningForest forest = build_spanning_forest(graph, component, {});
@@ -390,7 +419,8 @@ ContractionResult contract_two_edge_cuts(const FilterGraph& graph, NodeWeight U)
   std::vector<std::vector<EdgeID>> classes = find_two_edge_cut_classes(sigs);
 
   // Computed once, up front, rather than per class.
-  std::vector<std::pair<NodeID, NodeID>> edge_endpoints = compute_edge_endpoints(graph);
+  std::vector<std::pair<NodeID, NodeID>> edge_endpoints =
+      compute_edge_endpoints(graph);
   NodeWeight total_graph_weight = 0;
   for (size_t v = 0; v < n; ++v) total_graph_weight += graph.node_weight[v];
 
@@ -417,13 +447,14 @@ ContractionResult contract_two_edge_cuts(const FilterGraph& graph, NodeWeight U)
       seeds.push_back(edge_endpoints[e].second);
     }
 
-    BoundedComponentsResult res =
-        compute_bounded_components_excluding(graph, cls, seeds, total_graph_weight, U);
+    BoundedComponentsResult res = compute_bounded_components_excluding(
+        graph, cls, seeds, total_graph_weight, U);
 
     for (size_t k = 0; k < res.small_component_members.size(); ++k) {
       if (res.small_component_weight[k] <= U) {
         const std::vector<NodeID>& members = res.small_component_members[k];
-        for (size_t idx = 1; idx < members.size(); ++idx) uf.unite(members[0], members[idx]);
+        for (size_t idx = 1; idx < members.size(); ++idx)
+          uf.unite(members[0], members[idx]);
       }
     }
     if (!res.leftover_members.empty()) {
@@ -435,22 +466,31 @@ ContractionResult contract_two_edge_cuts(const FilterGraph& graph, NodeWeight U)
   return contract_graph(graph, uf);
 }
 
-ContractionResult run_tiny_cut_detection(const FilterGraph& graph, const TinyCutParams& params,
-                                          bool verbose) {
+ContractionResult run_tiny_cut_detection(const FilterGraph& graph,
+                                         const TinyCutParams& params,
+                                         bool verbose) {
   auto run_pass = [&](const char* name, auto&& pass) {
     const auto start = std::chrono::steady_clock::now();
     ContractionResult r = pass();
     if (verbose) {
-      const double seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
-      std::cerr << "[tiny-cut] " << name << ": " << r.graph.numNodes() << " vertices left ("
-                << seconds << "s)\n";
+      const double seconds = std::chrono::duration<double>(
+                                 std::chrono::steady_clock::now() - start)
+                                 .count();
+      std::cerr << "[tiny-cut] " << name << ": " << r.graph.numNodes()
+                << " vertices left (" << seconds << "s)\n";
     }
     return r;
   };
 
-  ContractionResult r1 = run_pass("pass 1 (component tree)", [&] { return contract_component_tree(graph, params); });
-  ContractionResult r2 = run_pass("pass 2 (degree-2 chains)", [&] { return contract_degree2_chains(r1.graph, params.U); });
-  ContractionResult r3 = run_pass("pass 3 (two-edge cuts)", [&] { return contract_two_edge_cuts(r2.graph, params.U); });
+  ContractionResult r1 = run_pass("pass 1 (component tree)", [&] {
+    return contract_component_tree(graph, params);
+  });
+  ContractionResult r2 = run_pass("pass 2 (degree-2 chains)", [&] {
+    return contract_degree2_chains(r1.graph, params.U);
+  });
+  ContractionResult r3 = run_pass("pass 3 (two-edge cuts)", [&] {
+    return contract_two_edge_cuts(r2.graph, params.U);
+  });
 
   std::vector<NodeID> composed(graph.numNodes());
   for (size_t v = 0; v < graph.numNodes(); ++v) {
