@@ -187,6 +187,18 @@ class NLevelCoarsener : public ICoarsener,
     _uncoarseningData.finalizeCoarsening();
   }
 
+  bool relaxCommunitiesImpl() override {
+    if ( !_context.coarsening.relax_communities_on_stall || _communities_relaxed ) {
+      return false;
+    }
+    Hypergraph& current_hg = _hg;
+    current_hg.doParallelForAllNodes([&](const HypernodeID hn) {
+      current_hg.setCommunityID(hn, current_hg.communityID(hn) % _context.partition.k);
+    });
+    _communities_relaxed = true;
+    return true;
+  }
+
   template<bool has_fixed_vertices>
   HypernodeID contract(const HypernodeID hn) {
     HypernodeID num_contractions = 0;
@@ -270,6 +282,7 @@ class NLevelCoarsener : public ICoarsener,
   parallel::scalable_vector<size_t> _enabled_vertex_flag_array;
   NumNodesTracker _num_nodes_tracker;
   int _pass_nr;
+  bool _communities_relaxed = false;
   utils::ProgressBar _progress_bar;
   bool _enable_randomization;
 };

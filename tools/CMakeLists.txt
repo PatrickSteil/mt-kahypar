@@ -86,3 +86,9 @@ target_link_libraries(EvaluatePartition MtKaHyPar-BuildTools)
 add_executable(VerifyPartition verify_partition.cc)
 copy_dependencies(VerifyPartition)
 target_link_libraries(VerifyPartition MtKaHyPar-BuildTools)
+
+add_executable(PunchFilter punch_filter.cc)
+target_link_libraries(PunchFilter MtKaHyPar-BuildTools)
+
+add_executable(RegionFilter region_filter.cc)
+target_link_libraries(RegionFilter MtKaHyPar-BuildTools)

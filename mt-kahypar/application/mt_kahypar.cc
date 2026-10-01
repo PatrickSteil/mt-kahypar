@@ -27,9 +27,16 @@
 
 #include <iostream>
 #include <chrono>
+#include <algorithm>
+#include <cstdint>
 #include <exception>
+#include <limits>
+#include <vector>
 
+#include "include/lib_generic_impls.h"
+#include "include/lib_helper_functions.h"
 #include "mt-kahypar/io/command_line_options.h"
+#include "mt-kahypar/io/hypergraph_io.h"
 #include "mt-kahypar/io/hypergraph_factory.h"
 #include "mt-kahypar/io/partitioning_output.h"
 #include "mt-kahypar/io/presets.h"
@@ -47,6 +54,44 @@
 
 using namespace mt_kahypar;
 using HighResClockTimepoint = std::chrono::time_point<std::chrono::high_resolution_clock>;
+
+// ! Checks whether the initial partition is a k-way partition or fragments
+// ! and returns the number of blocks required to store it.
+PartitionID checkInitialPartition(const std::vector<PartitionID>& initial_partition,
+                                  Context& context,
+                                  const mt_kahypar_hypergraph_t hypergraph) {
+  PartitionID max_id = -1;
+  for ( const PartitionID id : initial_partition ) {
+    if ( id < 0 ) {
+      throw InvalidInputException("Initial partition file contains negative block IDs!");
+    }
+    max_id = std::max(max_id, id);
+  }
+  context.partition.initial_partition_is_kway = max_id < context.partition.k;
+
+  if ( context.partition.mode != Mode::direct ) {
+    throw InvalidParameterException("Initial partitions are only supported in direct mode!");
+  }
+  if ( context.partition.fixed_vertex_filename != "" ) {
+    throw InvalidParameterException("Initial partitions can not be combined with fixed vertices!");
+  }
+  if ( !context.partition.initial_partition_is_kway ) {
+    // Hypergraphs would need O(m * #fragments) memory
+    if ( hypergraph.type != STATIC_GRAPH && hypergraph.type != DYNAMIC_GRAPH ) {
+      throw InvalidParameterException("Initial partitions with more than k blocks are only supported for graphs!");
+    }
+    if ( context.partition.objective == Objective::steiner_tree ) {
+      throw InvalidParameterException(
+        "Initial partitions with more than k blocks are not supported for the steiner_tree objective!");
+    }
+    // Community IDs store fragment * k + block
+    if ( static_cast<int64_t>(max_id + 1) * context.partition.k >
+         static_cast<int64_t>(std::numeric_limits<PartitionID>::max()) ) {
+      throw InvalidInputException("Too many fragments in initial partition file (#fragments * k exceeds 2^31)!");
+    }
+  }
+  return std::max(context.partition.k, max_id + 1);
+}
 
 int run(int argc, char* argv[]) {
   Context context(false);
@@ -129,10 +174,28 @@ int run(int argc, char* argv[]) {
   register_memory_pool(hypergraph, context);
   register_algorithms_and_policies();
 
+  // Read Initial Partition
+  mt_kahypar_partitioned_hypergraph_t partitioned_hypergraph { nullptr, NULLPTR_PARTITION };
+  if ( context.partition.initial_partition_filename != "" ) {
+    timer.start_timer("read_initial_partition", "Read Initial Partition File");
+    std::vector<PartitionID> initial_partition;
+    io::readPartitionFile(context.partition.initial_partition_filename,
+      lib::num_nodes<false>(hypergraph), initial_partition);
+    timer.stop_timer("read_initial_partition");
+    const PartitionID num_blocks = checkInitialPartition(initial_partition, context, hypergraph);
+    partitioned_hypergraph = lib::create_partitioned_hypergraph(
+      hypergraph, context, num_blocks, initial_partition.data());
+  }
+
   // Partition Hypergraph
   HighResClockTimepoint start = std::chrono::high_resolution_clock::now();
-  mt_kahypar_partitioned_hypergraph_t partitioned_hypergraph =
-    PartitionerFacade::partition(hypergraph, context, target_graph.get());
+  if ( context.partition.initial_partition_filename != "" ) {
+    // The input counts as an additional cycle before --num-vcycles V-cycles
+    context.partition.num_vcycles += 1;
+    PartitionerFacade::improve(partitioned_hypergraph, context, target_graph.get());
+  } else {
+    partitioned_hypergraph = PartitionerFacade::partition(hypergraph, context, target_graph.get());
+  }
   HighResClockTimepoint end = std::chrono::high_resolution_clock::now();
 
   // Print Stats

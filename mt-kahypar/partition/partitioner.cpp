@@ -410,7 +410,16 @@ namespace mt_kahypar {
     io::printContext(context);
     io::printMemoryPoolConsumption(context);
     io::printInputInformation(context, hypergraph);
-    io::printPartitioningResults(partitioned_hg, context, "\nInput Partition:");
+    if ( context.partition.initial_partition_filename.empty() ||
+         context.partition.initial_partition_is_kway ) {
+      io::printPartitioningResults(partitioned_hg, context, "\nInput Partition:");
+    } else if ( context.partition.enable_logging ) {
+      // Input has more blocks than k, i.e., balance metrics w.r.t. k are undefined
+      LOG << "\nInput Fragments:";
+      LOG << "Number of Fragments =" << partitioned_hg.k();
+      LOG << context.partition.objective << "="
+          << metrics::quality(partitioned_hg, context.partition.objective);
+    }
 
     // ################## PREPROCESSING ##################
     timer.start_timer("preprocessing", "Preprocessing");

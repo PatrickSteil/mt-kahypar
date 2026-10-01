@@ -42,6 +42,7 @@ endif()
 
 
 set(ToolsDatastructureSources
+      graph.cpp
       static_hypergraph_factory.cpp
       static_hypergraph.cpp
       static_graph_factory.cpp
