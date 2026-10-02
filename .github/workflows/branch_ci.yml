@@ -20,11 +20,11 @@ jobs:
 
     steps:
       - name: Checkout HEAD
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Install Dependencies
         run: |
-          sudo apt-get update && sudo apt-get install libtbb-dev libhwloc-dev lcov gcovr ${{ matrix.compiler.install_cmd }}
+          sudo apt-get -y update && sudo apt-get -y install libtbb-dev libhwloc-dev lcov gcovr ${{ matrix.compiler.install_cmd }}
 
       - name: Install Mt-KaHyPar
         env:
@@ -45,11 +45,11 @@ jobs:
 
     steps:
       - name: Checkout HEAD
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Install Dependencies
         run: |
-          sudo apt-get update && sudo apt-get install libtbb-dev libhwloc-dev lcov gcovr g++-14 gcc-14
+          sudo apt-get -y update && sudo apt-get -y install libtbb-dev libhwloc-dev lcov gcovr g++-14 gcc-14
 
       - name: Install Mt-KaHyPar Test Suite
         env:
@@ -75,11 +75,11 @@ jobs:
 
     steps:
       - name: Checkout HEAD
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Install Dependencies
         run: |
-          sudo apt-get update && sudo apt-get install libtbb-dev libhwloc-dev lcov gcovr
+          sudo apt-get -y update && sudo apt-get -y install libtbb-dev libhwloc-dev lcov gcovr
 
       - name: Run Mt-KaHyPar C Library Interface Tests
         run: |
@@ -97,11 +97,11 @@ jobs:
 
     steps:
       - name: Checkout HEAD
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Install Dependencies
         run: |
-          sudo apt-get update && sudo apt-get install libtbb-dev libhwloc-dev lcov gcovr
+          sudo apt-get -y update && sudo apt-get -y install libtbb-dev libhwloc-dev lcov gcovr
 
       - name: Build Mt-KaHyPar Python Interface
         run: |
