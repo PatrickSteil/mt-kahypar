@@ -51,6 +51,13 @@ std::string serialize(const PartitionedHypergraph& hypergraph,
       oss << " fixed_vertex_filename=" << context.partition.fixed_vertex_filename.substr(
               context.partition.fixed_vertex_filename.find_last_of('/') + 1);
     }
+    if ( context.partition.initial_partition_filename != "" ) {
+      oss << " initial_partition_filename=" << context.partition.initial_partition_filename.substr(
+              context.partition.initial_partition_filename.find_last_of('/') + 1)
+          << " initial_partition_is_kway=" << std::boolalpha << context.partition.initial_partition_is_kway
+          << " initial_partition_relax_on_stall=" << std::boolalpha << context.partition.initial_partition_relax_on_stall
+          << " initial_partition_vcycle_fragments=" << std::boolalpha << context.partition.initial_partition_vcycle_fragments;
+    }
     oss << " numHNs=" << hypergraph.initialNumNodes()
         << " numHEs=" << (PartitionedHypergraph::is_graph ? hypergraph.initialNumEdges() / 2 : hypergraph.initialNumEdges())
         << " mode=" << context.partition.mode
@@ -91,6 +98,7 @@ std::string serialize(const PartitionedHypergraph& hypergraph,
         << " coarsening_maximum_shrink_factor=" << context.coarsening.maximum_shrink_factor
         << " coarsening_max_allowed_node_weight=" << context.coarsening.max_allowed_node_weight
         << " coarsening_vertex_degree_sampling_threshold=" << context.coarsening.vertex_degree_sampling_threshold
+        << " coarsening_relax_communities_on_stall=" << std::boolalpha << context.coarsening.relax_communities_on_stall
         << " coarsening_num_sub_rounds_deterministic=" << context.coarsening.num_sub_rounds_deterministic
         << " coarsening_det_resolve_swaps=" << std::boolalpha << context.coarsening.det_resolve_swaps
         << " coarsening_use_two_hop=" << std::boolalpha << context.coarsening.use_two_hop
