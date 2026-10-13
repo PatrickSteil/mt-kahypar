@@ -14,18 +14,18 @@ jobs:
       CI_ACTIVE : 1
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install Dependencies
         run: |
           echo "deb http://cz.archive.ubuntu.com/ubuntu jammy main universe" | sudo tee -a /etc/apt/sources.list
           sudo apt-get -y update
-          sudo apt-get -y install libtbb-dev libhwloc-dev gcc-10 g++-10
+          sudo apt-get -y install libtbb-dev libhwloc-dev gcc-11 g++-11
 
       - name: Build Mt-KaHyPar Debian Package
         env:
-          CC: gcc-10
-          CXX: g++-10
+          CC: gcc-11
+          CXX: g++-11
         run: |
           rm -rf build
           mkdir build
@@ -36,7 +36,7 @@ jobs:
           make -j4
           make package-mtkahypar-deb
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: debian-package-x86
           path: ./build/packages/*.deb
@@ -50,17 +50,17 @@ jobs:
       CI_ACTIVE : 1
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install Dependencies
         run: |
           sudo apt-get -y update
-          sudo apt-get -y install libtbb-dev libhwloc-dev gcc-10 g++-10
+          sudo apt-get -y install libtbb-dev libhwloc-dev gcc-11 g++-11
 
       - name: Build Mt-KaHyPar Debian Package
         env:
-          CC: gcc-10
-          CXX: g++-10
+          CC: gcc-11
+          CXX: g++-11
         run: |
           rm -rf build
           mkdir build
@@ -71,7 +71,7 @@ jobs:
           make -j4
           make package-mtkahypar-deb
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: debian-package-arm
           path: ./build/packages/*.deb
@@ -82,9 +82,9 @@ jobs:
     name: Upload Packages to GitHub Release
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Collect Debian Packages
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           pattern: debian-*
           path: packages

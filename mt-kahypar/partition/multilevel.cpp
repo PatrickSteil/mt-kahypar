@@ -191,16 +191,15 @@ namespace {
     io::printLocalSearchBanner(context);
     timer.start_timer("refinement", "Refinement");
     std::unique_ptr<IUncoarsener<TypeTraits>> uncoarsener(nullptr);
-    if (uncoarseningData.nlevel) {
+    ALWAYS_ASSERT(uncoarseningData.nlevel == !Hypergraph::is_static_hypergraph);
+    if constexpr ( Hypergraph::is_static_hypergraph ) {
+      uncoarsener = std::make_unique<MultilevelUncoarsener<TypeTraits>>(
+        hypergraph, context, uncoarseningData, target_graph);
+    } else {
       #ifdef KAHYPAR_ENABLE_HIGHEST_QUALITY_FEATURES
         uncoarsener = std::make_unique<NLevelUncoarsener<TypeTraits>>(
           hypergraph, context, uncoarseningData, target_graph);
-      #else
-        throw InvalidParameterException("NLevel features are deactivated.");
       #endif
-    } else {
-      uncoarsener = std::make_unique<MultilevelUncoarsener<TypeTraits>>(
-        hypergraph, context, uncoarseningData, target_graph);
     }
     partitioned_hg = uncoarsener->uncoarsen();
 
