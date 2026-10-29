@@ -48,6 +48,17 @@ class PartitionerFacade {
                       Context& context,
                       TargetGraph* target_graph = nullptr);
 
+  // ! Creates a partitioned hypergraph from the given partition array
+  static mt_kahypar_partitioned_hypergraph_t createPartitionedHypergraph(mt_kahypar_hypergraph_t hypergraph,
+                                                                         const Context& context,
+                                                                         const PartitionID k,
+                                                                         const PartitionID* partition);
+
+  // ! Reads a partition from file and applies it to the hypergraph
+  static mt_kahypar_partitioned_hypergraph_t readPartitionFile(mt_kahypar_hypergraph_t hypergraph,
+                                                               const Context& context,
+                                                               const std::string& filename);
+
   // ! Prints timings and metrics to output
   static void printPartitioningResults(const mt_kahypar_partitioned_hypergraph_t phg,
                                        const Context& context,

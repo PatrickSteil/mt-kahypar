@@ -49,6 +49,9 @@ namespace mt_kahypar {
     if ( params.fixed_vertex_filename != "" ) {
       str << "  Fixed Vertex File:                  " << params.fixed_vertex_filename << std::endl;
     }
+    if ( params.input_partition_filename != "" ) {
+      str << "  Input Partition File:               " << params.input_partition_filename << std::endl;
+    }
     if ( params.write_partition_file ) {
       str << "  Partition File:                     " << params.graph_partition_filename << std::endl;
     }
@@ -429,6 +432,9 @@ namespace mt_kahypar {
   }
 
   void Context::sanityCheck(const TargetGraph* target_graph) {
+    if (partition.k < 1 || partition.k == std::numeric_limits<PartitionID>::max()) {
+      throw InvalidInputException("Value for number of blocks (-k) not specified or invalid. Must be at least 1.");
+    }
     if (!partition.use_individual_part_weights
         && (partition.epsilon < 0 || partition.epsilon == std::numeric_limits<double>::max())) {
       throw InvalidInputException("Value for imbalance (--epsilon) not specified or invalid. Must be non-negative number.");

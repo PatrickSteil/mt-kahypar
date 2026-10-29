@@ -38,29 +38,32 @@ if (NOT DEFINED BUILD_SHARED_LIBS)
   set(BUILD_SHARED_LIBS ON)
 endif()
 
+
 #################################################################
 ## Meta targets                                               ##
 #################################################################
 
+include(MtKaHyParHelpers)
+
 # meta targets for flags
-add_library(MtKaHyPar-BuildFlags INTERFACE)
+add_mtkahypar_library(MtKaHyPar-BuildFlags INTERFACE)
 target_compile_features(MtKaHyPar-BuildFlags INTERFACE cxx_std_20)
 
 # meta targets for includes and source files
-add_library(MtKaHyPar-Include INTERFACE)
+add_mtkahypar_library(MtKaHyPar-Include INTERFACE)
 target_include_directories(MtKaHyPar-Include INTERFACE ${CMAKE_CURRENT_SOURCE_DIR})
 
-add_library(MtKaHyPar-Sources INTERFACE)
+add_mtkahypar_library(MtKaHyPar-Sources INTERFACE)
 
-add_library(MtKaHyPar-ToolsSources INTERFACE)
+add_mtkahypar_library(MtKaHyPar-ToolsSources INTERFACE)
 
 # meta target for CLI/test build
-add_library(MtKaHyPar-BuildSources OBJECT "")
+add_mtkahypar_library(MtKaHyPar-BuildSources OBJECT "")
 target_link_libraries(MtKaHyPar-BuildSources PRIVATE MtKaHyPar-Sources)
 target_link_libraries(MtKaHyPar-BuildSources PUBLIC MtKaHyPar-Include MtKaHyPar-BuildFlags)
 
 # meta target for library build, which must be built with all features enabled
-add_library(MtKaHyPar-LibraryBuildSources OBJECT "")
+add_mtkahypar_library(MtKaHyPar-LibraryBuildSources OBJECT "")
 target_link_libraries(MtKaHyPar-LibraryBuildSources PRIVATE MtKaHyPar-Sources)
 target_link_libraries(MtKaHyPar-LibraryBuildSources PUBLIC MtKaHyPar-Include MtKaHyPar-BuildFlags)
 target_compile_definitions(MtKaHyPar-LibraryBuildSources PUBLIC MT_KAHYPAR_LIBRARY_MODE
@@ -159,7 +162,6 @@ if(KAHYPAR_ENABLE_THREAD_PINNING AND KAHYPAR_DISABLE_HWLOC)
   set(KAHYPAR_ENABLE_THREAD_PINNING FALSE CACHE STRING "" FORCE)
 endif()
 
-include(CopyDeps)
 if(UNIX)
   include(CheckIncludeFiles)
   set(CMAKE_REQUIRED_QUIET TRUE)
@@ -407,12 +409,12 @@ endif()
 #################################################################
 
 include(FetchContent)
-set(KAHYPAR_SHARED_RESOURCES_TAG 6d5c8e2444e4310667ec1925e995f26179d7ee88)
+set(KAHYPAR_SHARED_RESOURCES_TAG e01b552d49d9235fadb2dc4ca683e714694946c5)
 set(KAHYPAR_WHFC_TAG             dd3b7901f73ba9a1de44788172ded5ce33b83338)
 set(KAHYPAR_PARLAY_TAG           e1f1dc0ccf930492a2723f7fbef8510d35bf57f5)
 set(KAHYPAR_CLI11_VERSION        v2.7.2)
-set(KAHYPAR_TBB_VERSION          v2022.0.0)
-set(KAHYPAR_GOOGLETEST_VERSION   v1.15.2)
+set(KAHYPAR_TBB_VERSION          v2023.1.0)
+set(KAHYPAR_GOOGLETEST_VERSION   v1.18.0)
 set(KAHYPAR_PYBIND11_VERSION     v3.0.4)
 
 message(STATUS "Fetching dependencies...")
@@ -463,7 +465,7 @@ if (KAHYPAR_ENABLE_TESTING)
   FetchContent_MakeAvailable(googletest)
   include(gmock)
 
-  add_library(MtKaHyPar-Test INTERFACE)
+  add_mtkahypar_library(MtKaHyPar-Test INTERFACE)
   target_link_libraries(MtKaHyPar-Test INTERFACE gmock gtest gtest_main)
 endif()
 if (KAHYPAR_ENABLE_TESTING OR KAHYPAR_PYTHON)
@@ -475,7 +477,7 @@ if(KAHYPAR_DOWNLOAD_TBB)
   # Download TBB library
   FetchContent_Declare(
     TBB EXCLUDE_FROM_ALL SYSTEM
-    GIT_REPOSITORY https://github.com/oneapi-src/oneTBB.git
+    GIT_REPOSITORY https://github.com/uxlfoundation/oneTBB.git
     GIT_TAG        ${KAHYPAR_TBB_VERSION}
     GIT_SHALLOW    FALSE  # TBB seems to assume that a git repo is present
   )
@@ -539,7 +541,7 @@ add_subdirectory(dependencies)
 add_subdirectory(mt-kahypar)
 
 # export target for C interface
-add_library(MtKaHyPar::mtkahypar ALIAS mtkahypar)
+add_mtkahypar_library(MtKaHyPar::mtkahypar ALIAS mtkahypar)
 
 
 #################################################################
