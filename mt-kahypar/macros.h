@@ -50,15 +50,6 @@
 
 #include "kahypar-resources/macros.h"
 
-#define SPECIALIZATION(EXPR, TYPE)                                             \
-  template <bool T = EXPR> std::enable_if_t<T, TYPE>
-
-#define TRUE_SPECIALIZATION(EXPR, TYPE)                                        \
-  template <bool T = EXPR> std::enable_if_t<T, TYPE>
-
-#define FALSE_SPECIALIZATION(EXPR, TYPE)                                       \
-  template <bool T = EXPR> std::enable_if_t<!T, TYPE>
-
 #if (defined(__GNUC__) || defined(__clang__)) && defined(NDEBUG)
 #define MT_KAHYPAR_ATTRIBUTE_ALWAYS_INLINE __attribute__ ((always_inline)) inline
 #else
@@ -132,13 +123,20 @@
 #define STREAM2STR(X) static_cast<std::stringstream>(X).str();
 
 // Info, Warning and Error Output Macros
-#define GREEN "\033[1;92m"
-#define CYAN "\033[1;96m"
-#define YELLOW "\033[1;93m"
-#define RED "\033[1;91m"
-#define WHITE "\033[1;97m"
-#define BOLD "\033[1m"
-#define END "\033[0m"
+// kahypar-resources defines some of these macros as well
+#undef GREEN
+#undef CYAN
+#undef YELLOW
+#undef RED
+#undef BOLD
+#undef END
+#define GREEN ::mt_kahypar::color::code("\033[1;92m")
+#define CYAN ::mt_kahypar::color::code("\033[1;96m")
+#define YELLOW ::mt_kahypar::color::code("\033[1;93m")
+#define RED ::mt_kahypar::color::code("\033[1;91m")
+#define WHITE ::mt_kahypar::color::code("\033[1;97m")
+#define BOLD ::mt_kahypar::color::code("\033[1m")
+#define END ::mt_kahypar::color::code("\033[0m")
 #define INFO(msg) LOG << CYAN << "[INFO]" << END << msg
 #ifdef WARNING
 #undef WARNING
@@ -175,6 +173,9 @@
     ERR(error_msg);                                                            \
   }
 #endif
+
+// needs MT_KAHYPAR_IS_LIBRARY_MODE
+#include "mt-kahypar/utils/color.h"
 
 #ifdef KAHYPAR_ENABLE_EXPERIMENTAL_FEATURES
 #define ENABLE_EXPERIMENTAL_FEATURES(X) X
